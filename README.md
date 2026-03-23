@@ -22,7 +22,7 @@ ESS does **not** remediate. It watches, investigates, and reports.
 
 | Component | Technology |
 |-----------|-----------|
-| Runtime | Python 3.12+ |
+| Runtime | Python 3.14+ |
 | Package manager | uv |
 | HTTP framework | FastAPI + uvicorn |
 | LLM | AWS Bedrock (Claude Haiku 4.5 / Sonnet 4.6) |

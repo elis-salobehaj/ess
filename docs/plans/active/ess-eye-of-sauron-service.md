@@ -4,14 +4,13 @@ status: active
 priority: high
 estimated_hours: 80-120
 created: 2026-03-22
-date_updated: 2026-03-22
+date_updated: 2026-03-23
 related_files:
-  - src/server.py
-  - src/datadog_integration.py
-  - src/sentry_integration.py
+  - src/main.py
   - src/config.py
-  - src/config_loader.py
-  - config/services.yaml
+  - src/models.py
+  - src/scheduler.py
+  - src/llm_client.py
 tags:
   - agentic-ai
   - post-deploy
@@ -21,13 +20,13 @@ tags:
   - ms-teams
 completion:
   - "# Phase 1 — Foundation & Trigger API"
-  - [ ] E1.1 Scaffold ESS repo and Python project structure
-  - [ ] E1.2 Implement HTTP trigger endpoint (FastAPI)
-  - [ ] E1.3 Define deploy-event schema (Pydantic)
-  - [ ] E1.4 Implement job scheduler for timed health-check cycles
-  - [ ] E1.5 Add configuration layer (pydantic-settings)
-  - [ ] E1.6 Unit tests for trigger and scheduler
-  - [ ] E1.7 Documentation — README, AGENTS.md, docs/INDEX.md
+  - [x] E1.1 Scaffold ESS repo and Python project structure
+  - [x] E1.2 Implement HTTP trigger endpoint (FastAPI)
+  - [x] E1.3 Define deploy-event schema (Pydantic)
+  - [x] E1.4 Implement job scheduler for timed health-check cycles
+  - [x] E1.5 Add configuration layer (pydantic-settings)
+  - [x] E1.6 Unit tests for trigger and scheduler
+  - [x] E1.7 Documentation — README, AGENTS.md, docs/INDEX.md
   - "# Phase 2 — Tool Integration Layer"
   - [ ] E2.1 Integrate Datadog Pup CLI as subprocess tool executor
   - [ ] E2.2 Integrate Sentry MCP server as stdio tool executor
@@ -936,7 +935,7 @@ Cards include:
 #### E5.1 — Docker
 
 ```dockerfile
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Install Pup CLI
 RUN curl -fsSL https://github.com/datadog-labs/pup/releases/latest/download/pup-linux-amd64 \
@@ -1020,7 +1019,7 @@ notify_ess:
 
 | Dependency | Purpose | Version |
 |---|---|---|
-| Python | Runtime | 3.12+ |
+| Python | Runtime | 3.14+ |
 | FastAPI | Trigger API | Latest |
 | uvicorn | ASGI server | Latest |
 | pydantic / pydantic-settings | Config, schemas | v2 |

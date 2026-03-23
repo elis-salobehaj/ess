@@ -2,10 +2,37 @@
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - Docker and Docker Compose (for containerised runs)
 - Access to: Datadog (API key + app key), Sentry (auth token), AWS Bedrock
+- Datadog Pup CLI v0.34+ (see install instructions below)
+
+## Install Pup CLI (Datadog tool)
+
+Pup is a Datadog Labs CLI binary used by ESS to query Datadog via subprocess.
+Check the [releases page](https://github.com/datadog-labs/pup/releases) for the
+latest version — as of March 2026 it is v0.34.1.
+
+```bash
+# Linux / WSL (x86_64) — download and install v0.34.1
+mkdir -p /tmp/pup && \
+curl -fsSL https://github.com/datadog-labs/pup/releases/download/v0.34.1/pup_0.34.1_Linux_x86_64.tar.gz \
+  -o /tmp/pup/pup_0.34.1_Linux_x86_64.tar.gz && \
+  tar -xzf /tmp/pup/pup_0.34.1_Linux_x86_64.tar.gz -C /tmp/pup/ && \
+  mv /tmp/pup/pup ~/.local/bin/pup && \
+  rm -rf /tmp/pup/ && \
+  chmod +x ~/.local/bin/pup
+
+# Validate
+pup --version
+```
+
+Ensure `~/.local/bin` is on your `$PATH`. If not, add to your shell profile:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 ## Local Setup
 

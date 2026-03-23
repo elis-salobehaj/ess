@@ -24,8 +24,8 @@
 
 | # | Plan | Status | Est. Hours |
 |---|------|--------|------------|
-| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Backlog → Active | 80-120h |
-| 2 | **Datadog Pup CLI Integration** ([plan](plans/active/ess-datadog-pup-integration.md)) | Backlog → Active | 25-35h |
+| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Phase 2 next | 80-120h |
+| 2 | **Datadog Pup CLI Integration** ([plan](plans/active/ess-datadog-pup-integration.md)) | Active — D1–D3 not started | 25-35h |
 
 ### Deliverable Plans (Backlog)
 
