@@ -36,8 +36,7 @@ ess/
 ├── README.md              # Project overview
 ├── pyproject.toml         # Python project config
 ├── config/
-│   ├── .env.example       # Environment template
-│   └── services.yaml      # Service catalog (shared with log-ai)
+│   └── .env.example       # Environment template
 ├── src/
 │   ├── __init__.py
 │   ├── main.py            # FastAPI app entry point
@@ -78,11 +77,23 @@ ESS uses structured JSON logging. Key fields:
 ## Docker Development
 
 ```bash
-# Build and run
-docker compose up --build
+# Build the ESS image (pins Pup CLI version via build arg)
+docker build -t ess:dev .
 
-# Run tests in container
-docker compose run --rm ess uv run pytest
+# Override Pup version at build time (default: 0.34.1)
+docker build --build-arg PUP_VERSION=0.34.1 -t ess:dev .
+
+# Run the service (pass credentials via env file)
+docker run --rm --env-file config/.env -p 8080:8080 ess:dev
+
+# Validate Pup CLI is installed in the image
+docker run --rm ess:dev pup --version
+
+# Run tests on the host (the production image excludes tests/ by design)
+uv run pytest
+
+# Or with docker compose
+docker compose up --build
 ```
 
 ## Plan-Driven Workflow

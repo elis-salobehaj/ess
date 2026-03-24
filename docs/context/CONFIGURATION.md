@@ -22,7 +22,7 @@ settings from `src/config.py` — never use raw `os.getenv()`.
 |---|---|---|---|
 | `DD_API_KEY` | Yes | — | Datadog API key |
 | `DD_APP_KEY` | Yes | — | Datadog application key |
-| `DD_SITE` | No | `app.datadoghq.com` | Datadog site |
+| `DD_SITE` | No | `datadoghq.com` | Datadog site base domain used by Pup |
 | `PUP_MAX_CONCURRENT` | No | `10` | Max parallel Pup CLI calls |
 | `PUP_DEFAULT_TIMEOUT` | No | `60` | Pup subprocess timeout (seconds) |
 

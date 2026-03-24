@@ -1,0 +1,34 @@
+# Git
+.git/
+.gitignore
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environment — copied from builder stage, not host
+.venv/
+
+# Development and test artefacts
+tests/
+docs/
+.agents/
+
+# Build outputs
+dist/
+*.egg-info/
+
+# Credentials — never bake into image
+config/.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

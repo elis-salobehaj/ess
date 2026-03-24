@@ -35,16 +35,16 @@ class ESSConfig(BaseSettings):
     # -------------------------------------------------------------------------
     # Datadog (environment variables consumed by the Pup CLI binary)
     # -------------------------------------------------------------------------
-    dd_api_key: str = ""
-    dd_app_key: str = ""
-    dd_site: str = "app.datadoghq.com"
+    dd_api_key: str
+    dd_app_key: str
+    dd_site: str = "datadoghq.com"
     pup_max_concurrent: int = 10  # max parallel Pup CLI subprocess calls
     pup_default_timeout: int = 60  # seconds per Pup subprocess call
 
     # -------------------------------------------------------------------------
     # Sentry
     # -------------------------------------------------------------------------
-    sentry_auth_token: str = ""
+    sentry_auth_token: str
     sentry_host: str = "sentry.example.com"
     sentry_org: str = "example"
 

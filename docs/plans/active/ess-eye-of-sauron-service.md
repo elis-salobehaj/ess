@@ -466,7 +466,7 @@ infrastructure (K8s vs. ECS Fargate) with different naming conventions.
     "services": [
         {
             "name": "hub-ca-auth",                    # log service name
-            "datadog_service_name": "pason-auth-service",
+            "datadog_service_name": "example-auth-service",
             "sentry_project": "auth-service",
             "sentry_dsn": "https://...",              # optional
             "infrastructure": "k8s",                   # k8s | ecs-fargate
@@ -474,7 +474,7 @@ infrastructure (K8s vs. ECS Fargate) with different naming conventions.
         },
         {
             "name": "hub-ca-auth-scheduler",           # sidecar scheduler
-            "datadog_service_name": "pason-auth-scheduler",
+            "datadog_service_name": "example-auth-scheduler",
             "sentry_project": "auth-scheduler",
             "infrastructure": "ecs-fargate",
             "log_search_host": "syslog-ca.example.com"

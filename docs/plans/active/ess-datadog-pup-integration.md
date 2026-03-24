@@ -4,13 +4,20 @@ status: active
 priority: high
 estimated_hours: 25-35
 created: 2026-03-22
-date_updated: 2026-03-22
+date_updated: 2026-03-24
 parent_plan: plans/active/ess-eye-of-sauron-service.md
 related_files:
+    - src/main.py
   - src/tools/pup_tool.py
+  - src/tools/normalise.py
   - src/config.py
   - src/models.py
+    - tests/test_trigger.py
+    - tests/test_main.py
   - tests/test_pup_tool.py
+  - Dockerfile
+  - .dockerignore
+    - docs/guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md
 tags:
   - ess
   - datadog
@@ -18,18 +25,19 @@ tags:
   - observability
 completion:
   - "# Phase D1 — Pup CLI Adapter"
-  - [ ] D1.1 Install and validate Pup CLI in dev environment
-  - [ ] D1.2 Implement PupTool async subprocess executor
-  - [ ] D1.3 Implement health-check convenience methods
-  - [ ] D1.4 Implement investigation convenience methods
-  - [ ] D1.5 Error handling, timeouts, and structured output parsing
-  - [ ] D1.6 Unit tests with mocked subprocess responses
+  - [x] D1.1 Install and validate Pup CLI in dev environment
+  - [x] D1.2 Implement PupTool async subprocess executor
+  - [x] D1.3 Implement health-check convenience methods
+  - [x] D1.4 Implement investigation convenience methods
+  - [x] D1.5 Error handling, timeouts, and structured output parsing
+  - [x] D1.6 Unit tests with mocked subprocess responses
   - "# Phase D2 — Docker & Auth"
-  - [ ] D2.1 Dockerfile — install Pup binary
-  - [ ] D2.2 Auth flow — DD_API_KEY + DD_APP_KEY via ESSConfig
-  - [ ] D2.3 Rate limiting (max concurrent subprocess calls)
-  - [ ] D2.4 Circuit breaker for consecutive failures
-  - [ ] D2.5 Integration test with real Datadog (marked @pytest.mark.integration)
+  - [x] D2.1 Dockerfile — install Pup binary
+  - [x] D2.2 Auth flow — DD_API_KEY + DD_APP_KEY via ESSConfig
+  - [x] D2.3 Rate limiting (max concurrent subprocess calls)
+  - [x] D2.4 Circuit breaker for consecutive failures
+  - [x] D2.5 Integration test with real Datadog (marked @pytest.mark.integration)
+  - [x] D2.6 Expose latest health-check findings on session status endpoint
   - "# Phase D3 — Agent Tool Definitions"
   - [ ] D3.1 Define Bedrock-compatible tool schemas for Pup commands
   - [ ] D3.2 Map tool results to ToolResult normalised format
@@ -239,8 +247,10 @@ These are the standard checks ESS runs every cycle:
 
     async def get_apm_stats(self, service: str, env: str) -> PupResult:
         """Get APM latency, error rate, and throughput stats."""
+        # NOTE (v0.34.1): pup apm services stats has no --service flag.
+        # It returns stats for ALL services in the env; caller filters by service.
         return await self.execute([
-            "apm", "services", "stats", service,
+            "apm", "services", "stats",
             f"--env={env}",
         ])
 ```
@@ -268,7 +278,8 @@ These run only when triage detects anomalies:
     async def get_apm_operations(self, service: str, env: str) -> PupResult:
         """Get per-operation breakdown (slow endpoints, high error routes)."""
         return await self.execute([
-            "apm", "services", "operations", service,
+            "apm", "services", "operations",
+            f"--service={service}",
             f"--env={env}",
         ])
 
@@ -284,7 +295,8 @@ These run only when triage detects anomalies:
                                  env: str) -> PupResult:
         """Get resource-level stats for a specific operation."""
         return await self.execute([
-            "apm", "services", "resources", service,
+            "apm", "services", "resources",
+            f"--service={service}",
             f"--operation={operation}",
             f"--env={env}",
         ])
@@ -403,27 +415,72 @@ cooldown period (e.g., 60s).
 @pytest.mark.integration
 async def test_pup_monitors_list_real():
     """Call Pup monitors list against real Datadog — requires DD_API_KEY."""
-    tool = PupTool(config=load_test_config())
-    result = await tool.get_monitor_status("pason-auth-service", "production")
+    tool = PupTool(config=ESSConfig())
+    result = await tool.get_monitor_status("example-auth-service", "production")
     assert result.exit_code == 0
     assert result.data is not None
 
 @pytest.mark.integration
 async def test_pup_apm_stats_real():
     """Call Pup APM stats against real Datadog."""
-    tool = PupTool(config=load_test_config())
-    result = await tool.get_apm_stats("pason-auth-service", "production")
+    tool = PupTool(config=ESSConfig())
+    result = await tool.get_apm_stats("example-auth-service", "production")
     assert result.exit_code == 0
 
 @pytest.mark.integration
 async def test_pup_logs_search_real():
     """Call Pup logs search against real Datadog."""
-    tool = PupTool(config=load_test_config())
-    result = await tool.search_error_logs("pason-auth-service", minutes=30)
+    tool = PupTool(config=ESSConfig())
+    result = await tool.search_error_logs("example-auth-service", minutes=30)
     assert result.exit_code == 0
 ```
 
-Run with: `uv run pytest tests/ -m integration`
+Run with: `uv run pytest tests/test_pup_tool.py -m integration`
+
+---
+
+### D2.6 — Expose latest health-check findings on session status endpoint
+
+For quick first-iteration inspection during development, `GET /api/v1/deploy/{job_id}`
+returns the latest completed `HealthCheckResult` as `latest_result`.
+
+This keeps the implementation simple:
+
+- no new persistence layer
+- no separate results endpoint
+- no pagination or history querying yet
+
+Example response shape:
+
+```json
+{
+    "job_id": "ess-ffd07a29",
+    "status": "running",
+    "checks_completed": 1,
+    "checks_planned": 2,
+    "latest_result": {
+        "cycle_number": 1,
+        "overall_severity": "HEALTHY",
+        "findings": [
+            {
+                "tool": "datadog.apm_stats",
+                "severity": "HEALTHY",
+                "summary": "example-well-service: Pup apm_stats returned successfully"
+            }
+        ],
+        "services_checked": ["example-well-service"],
+        "raw_tool_outputs": {
+            "example-well-service:datadog.apm_stats": {
+                "success": true,
+                "summary": "Pup apm_stats returned successfully"
+            }
+        }
+    }
+}
+```
+
+This is intended for local debugging and early end-to-end validation. A richer
+history/results API can be added later if Phase 3 or later workflows need it.
 
 ---
 
@@ -447,7 +504,7 @@ DATADOG_TOOLS = [
                     "properties": {
                         "service": {
                             "type": "string",
-                            "description": "Datadog service name (e.g., 'pason-auth-service')"
+                            "description": "Datadog service name (e.g., 'example-auth-service')"
                         },
                         "environment": {
                             "type": "string",
@@ -610,7 +667,7 @@ You have access to Datadog observability data through the following tools:
 
 When checking Datadog, always use the `datadog_service_name` from the deploy
 context, not the log service name. These may differ (e.g., log name
-"hub-ca-auth" → Datadog name "pason-auth-service").
+"hub-ca-auth" → Datadog name "example-auth-service").
 ```
 
 ---

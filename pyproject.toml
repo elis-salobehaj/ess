@@ -31,7 +31,8 @@ package = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-markers = ["integration: marks tests requiring real external services"]
+addopts = "-m 'not integration'"
+markers = ["integration: marks tests requiring real external services (deselected by default)"]
 
 [tool.ruff]
 line-length = 100

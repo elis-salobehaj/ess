@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
 import boto3
+import structlog
 from botocore.config import Config as BotocoreConfig
 
 from src.config import ESSConfig
@@ -27,7 +27,7 @@ from src.config import ESSConfig
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger: structlog.BoundLogger = structlog.get_logger(__name__)  # type: ignore[assignment]
 
 # Maximum tokens we will allow in a single Bedrock response.
 _MAX_TOKENS = 4096
@@ -100,12 +100,10 @@ class BedrockClient:
 
         logger.debug(
             "Bedrock converse completed",
-            extra={
-                "model": self._model_id,
-                "input_tokens": response.get("usage", {}).get("inputTokens"),
-                "output_tokens": response.get("usage", {}).get("outputTokens"),
-                "stop_reason": response.get("stopReason"),
-            },
+            model=self._model_id,
+            input_tokens=response.get("usage", {}).get("inputTokens"),
+            output_tokens=response.get("usage", {}).get("outputTokens"),
+            stop_reason=response.get("stopReason"),
         )
         return response
 

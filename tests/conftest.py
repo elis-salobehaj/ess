@@ -54,7 +54,7 @@ def valid_deploy_payload() -> dict:
         "services": [
             {
                 "name": "hub-ca-auth",
-                "datadog_service_name": "pason-auth-service",
+                "datadog_service_name": "example-auth-service",
                 "sentry_project": "auth-service",
                 "infrastructure": "k8s",
             }

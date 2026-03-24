@@ -14,17 +14,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.models import DeployTrigger, HealthCheckResult, HealthSeverity
 
-logger = logging.getLogger(__name__)
+logger: structlog.BoundLogger = structlog.get_logger(__name__)  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -142,13 +142,11 @@ class ESSScheduler:
 
         logger.info(
             "Monitoring session scheduled",
-            extra={
-                "job_id": job_id,
-                "services": [s.name for s in deploy.services],
-                "window_minutes": window,
-                "check_interval_minutes": interval,
-                "checks_planned": checks_planned,
-            },
+            job_id=job_id,
+            services=[s.name for s in deploy.services],
+            window_minutes=window,
+            check_interval_minutes=interval,
+            checks_planned=checks_planned,
         )
         return session
 
@@ -166,7 +164,7 @@ class ESSScheduler:
         with contextlib.suppress(Exception):
             self._scheduler.remove_job(job_id)
 
-        logger.info("Monitoring session cancelled", extra={"job_id": job_id})
+        logger.info("Monitoring session cancelled", job_id=job_id)
         return True
 
     def get_session(self, job_id: str) -> MonitoringSession | None:
@@ -206,7 +204,9 @@ class ESSScheduler:
         except Exception as exc:
             logger.exception(
                 "Health check failed",
-                extra={"job_id": job_id, "cycle": cycle, "error": str(exc)},
+                job_id=job_id,
+                cycle=cycle,
+                error=str(exc),
             )
             async with self._lock:
                 session.last_error = str(exc)
@@ -239,16 +239,15 @@ class ESSScheduler:
         except Exception as exc:
             logger.exception(
                 "Completion callback failed",
-                extra={"job_id": job_id, "error": str(exc)},
+                job_id=job_id,
+                error=str(exc),
             )
 
         logger.info(
             "Monitoring session completed",
-            extra={
-                "job_id": job_id,
-                "checks_completed": session.checks_completed,
-                "overall_severity": self._aggregate_severity(session),
-            },
+            job_id=job_id,
+            checks_completed=session.checks_completed,
+            overall_severity=self._aggregate_severity(session),
         )
 
     @staticmethod

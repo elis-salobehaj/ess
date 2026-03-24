@@ -67,7 +67,7 @@ class TestDeploymentInfo:
 class TestServiceTarget:
     def test_valid_service(self) -> None:
         s = ServiceTarget.model_validate(
-            {"name": "hub-ca-auth", "datadog_service_name": "pason-auth"}
+            {"name": "hub-ca-auth", "datadog_service_name": "example-auth"}
         )
         assert s.infrastructure == Infrastructure.K8S  # default
 

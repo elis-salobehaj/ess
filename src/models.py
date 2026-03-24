@@ -169,6 +169,7 @@ class JobStatusResponse(BaseModel):
     started_at: datetime
     next_check_at: datetime | None
     deploy_context: DeploymentInfo
+    latest_result: HealthCheckResult | None = None
 
 
 class CancelResponse(BaseModel):

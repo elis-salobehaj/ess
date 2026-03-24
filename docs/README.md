@@ -25,7 +25,7 @@
 | # | Plan | Status | Est. Hours |
 |---|------|--------|------------|
 | 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Phase 2 next | 80-120h |
-| 2 | **Datadog Pup CLI Integration** ([plan](plans/active/ess-datadog-pup-integration.md)) | Active — D1–D3 not started | 25-35h |
+| 2 | **Datadog Pup CLI Integration** ([plan](plans/active/ess-datadog-pup-integration.md)) | D1 ✅ D2 ✅ — D3 next | 25-35h |
 
 ### Deliverable Plans (Backlog)
 
@@ -50,6 +50,7 @@
 
 - [Getting Started](guides/GETTING_STARTED.md) — Local setup and first deploy trigger
 - [Development](guides/DEVELOPMENT.md) — Commands, testing, linting, Docker
+- [Trigger End-to-End Datadog Pup Integration](guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md) — Real local deploy trigger against live Datadog Pup checks
 
 ---
 

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+from datetime import UTC, datetime
 
 from httpx import AsyncClient
+
+from src.models import HealthCheckResult, HealthFinding, HealthSeverity
 
 
 class TestTriggerEndpoint:
@@ -35,7 +38,7 @@ class TestTriggerEndpoint:
         payload["services"].append(
             {
                 "name": "hub-ca-auth-scheduler",
-                "datadog_service_name": "pason-auth-scheduler",
+                "datadog_service_name": "example-auth-scheduler",
                 "infrastructure": "ecs-fargate",
             }
         )
@@ -113,6 +116,47 @@ class TestGetSession:
         body = get_resp.json()
         assert body["job_id"] == job_id
         assert body["services_monitored"] == 1
+        assert body["latest_result"] is None
+
+    async def test_get_session_includes_latest_result(
+        self,
+        client: AsyncClient,
+        app,
+        valid_deploy_payload: dict,
+    ) -> None:
+        resp = await client.post("/api/v1/deploy", json=valid_deploy_payload)
+        job_id = resp.json()["job_id"]
+
+        session = app.state.scheduler.get_session(job_id)
+        assert session is not None
+        session.results.append(
+            HealthCheckResult(
+                job_id=job_id,
+                cycle_number=1,
+                checked_at=datetime.now(tz=UTC),
+                overall_severity=HealthSeverity.WARNING,
+                findings=[
+                    HealthFinding(
+                        tool="datadog.error_logs",
+                        severity=HealthSeverity.WARNING,
+                        summary="example-well-service: recent error logs found",
+                    )
+                ],
+                services_checked=["hub-ca-auth"],
+                raw_tool_outputs={
+                    "hub-ca-auth:datadog.error_logs": {"summary": "recent error logs found"}
+                },
+            )
+        )
+
+        get_resp = await client.get(f"/api/v1/deploy/{job_id}")
+
+        assert get_resp.status_code == 200
+        body = get_resp.json()
+        assert body["latest_result"] is not None
+        assert body["latest_result"]["cycle_number"] == 1
+        assert body["latest_result"]["overall_severity"] == "WARNING"
+        assert body["latest_result"]["findings"][0]["tool"] == "datadog.error_logs"
 
     async def test_get_unknown_session_returns_404(self, client: AsyncClient) -> None:
         response = await client.get("/api/v1/deploy/ess-doesnotexist")
