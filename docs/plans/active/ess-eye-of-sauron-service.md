@@ -6,57 +6,72 @@ estimated_hours: 80-120
 created: 2026-03-22
 date_updated: 2026-03-28
 related_files:
-  - src/main.py
-  - src/config.py
-  - src/models.py
-  - src/scheduler.py
-  - src/llm_client.py
+    - src/main.py
+    - src/config.py
+    - src/models.py
+    - src/scheduler.py
+    - src/llm_client.py
+    - src/agent/health_check_agent.py
+    - src/notifications/__init__.py
+    - docs/context/ARCHITECTURE.md
+    - docs/context/CONFIGURATION.md
+    - docs/context/WORKFLOWS.md
+    - docs/designs/technology-decisions.md
+    - config/.env.example
 tags:
-  - agentic-ai
-  - post-deploy
-  - observability
-  - datadog-pup
-  - sentry-mcp
-  - ms-teams
+    - agentic-ai
+    - post-deploy
+    - observability
+    - datadog-pup
+    - sentry-mcp
+    - ms-teams
 completion:
-  - "# Phase 1 — Foundation & Trigger API"
-  - [x] E1.1 Scaffold ESS repo and Python project structure
-  - [x] E1.2 Implement HTTP trigger endpoint (FastAPI)
-  - [x] E1.3 Define deploy-event schema (Pydantic)
-  - [x] E1.4 Implement job scheduler for timed health-check cycles
-  - [x] E1.5 Add configuration layer (pydantic-settings)
-  - [x] E1.6 Unit tests for trigger and scheduler
-  - [x] E1.7 Documentation — README, AGENTS.md, docs/INDEX.md
-  - "# Phase 2 — Tool Integration Layer"
-  - [ ] E2.1 Integrate Datadog Pup CLI as subprocess tool executor
-  - [ ] E2.2 Integrate Sentry MCP server as stdio tool executor
-  - [ ] E2.3 Implement log scout HTTP adapter (remote log search)
-  - [ ] E2.4 Build unified tool-result normalisation layer
-  - [ ] E2.5 Unit tests for each tool adapter
-  - [ ] E2.6 Documentation update — tool integration guide
-  - "# Phase 3 — Agentic AI Orchestration"
-  - [ ] E3.1 Implement agent orchestrator (LLM-driven reasoning loop)
-  - [ ] E3.2 Define system prompt and tool descriptions
-  - [ ] E3.3 Implement health-check workflow (triage → investigate → report)
-  - [ ] E3.4 Build escalation logic (severity thresholds, retry/deepen cycle)
-  - [ ] E3.5 Implement context-window management and summarisation
-  - [ ] E3.6 Unit and integration tests for orchestrator
-  - [ ] E3.7 Documentation update — orchestration design
-  - "# Phase 4 — Notification & Reporting"
-  - [ ] E4.1 Implement MS Teams webhook publisher
-  - [ ] E4.2 Design adaptive card templates for health reports
-  - [ ] E4.3 Implement investigation summary publisher
-  - [ ] E4.4 Add webhook retry and failure handling
-  - [ ] E4.5 Unit tests for notification layer
-  - [ ] E4.6 Documentation update — notification config guide
-  - "# Phase 5 — Deployment, Observability & Hardening"
-  - [ ] E5.1 Containerise (Dockerfile, docker-compose)
-  - [ ] E5.2 GitLab CI pipeline template for trigger integration
-  - [ ] E5.3 Add ESS self-observability (structured logging, health endpoint)
-  - [ ] E5.4 Rate-limit and circuit-breaker for external API calls
-  - [ ] E5.5 End-to-end integration test with mock deploy trigger
-  - [ ] E5.6 Production deployment guide
-  - [ ] E5.7 Final review-plan-phase audit
+    - "# Phase 1 — Foundation & Trigger API"
+    - [x] E1.1 Scaffold ESS repo and Python project structure
+    - [x] E1.2 Implement HTTP trigger endpoint (FastAPI)
+    - [x] E1.3 Define deploy-event schema (Pydantic)
+    - [x] E1.4 Implement job scheduler for timed health-check cycles
+    - [x] E1.5 Add configuration layer (pydantic-settings)
+    - [x] E1.6 Unit tests for trigger and scheduler
+    - [x] E1.7 Documentation — README, AGENTS.md, docs/README.md
+    - "# Phase 1.5 — Self-Unattended and Inspectable Datadog Deliverable"
+    - [x] E15.1 Ship Datadog-only Bedrock tool loop with deterministic Pup fallback
+    - [ ] E15.2 Add debug-gated local trace sink with OpenTelemetry-aligned event model
+    - [ ] E15.3 Add Teams-mode config gate and real completion callback
+    - [ ] E15.4 Implement warning, critical, and end-of-window notification policy
+    - [ ] E15.5 Validate GitLab-triggered Datadog-only monitoring for 30-60 minute windows
+    - [ ] E15.6 Documentation — Datadog-only unattended and inspectable ship guide
+    - [ ] E15.7 review-plan-phase audit for the narrowed first ship
+    - "# Phase 2 — Tool Integration Layer"
+    - [x] E2.1 Integrate Datadog Pup CLI as subprocess tool executor
+    - [ ] E2.2 Integrate Sentry MCP server as stdio tool executor
+    - [ ] E2.3 Implement log scout HTTP adapter (remote log search)
+    - [ ] E2.4 Build unified tool-result normalisation layer
+    - [ ] E2.5 Unit tests for each tool adapter
+    - [ ] E2.6 Documentation update — tool integration guide
+    - "# Phase 3 — Agentic AI Orchestration"
+    - [ ] E3.1 Implement agent orchestrator (LLM-driven reasoning loop)
+    - [ ] E3.2 Define system prompt and tool descriptions
+    - [ ] E3.3 Implement health-check workflow (triage → investigate → report)
+    - [ ] E3.4 Build escalation logic (severity thresholds, retry/deepen cycle)
+    - [ ] E3.5 Implement context-window management and summarisation
+    - [ ] E3.6 Unit and integration tests for orchestrator
+    - [ ] E3.7 Documentation update — orchestration design
+    - "# Phase 4 — Notification & Reporting"
+    - [ ] E4.1 Implement MS Teams webhook publisher
+    - [ ] E4.2 Design adaptive card templates for health reports
+    - [ ] E4.3 Implement investigation summary publisher
+    - [ ] E4.4 Add webhook retry and failure handling
+    - [ ] E4.5 Unit tests for notification layer
+    - [ ] E4.6 Documentation update — notification config guide
+    - "# Phase 5 — Deployment, Observability & Hardening"
+    - [ ] E5.1 Containerise (Dockerfile, docker-compose)
+    - [ ] E5.2 GitLab CI pipeline template for trigger integration
+    - [ ] E5.3 Add ESS self-observability (structured logging, health endpoint)
+    - [ ] E5.4 Rate-limit and circuit-breaker for external API calls
+    - [ ] E5.5 End-to-end integration test with mock deploy trigger
+    - [ ] E5.6 Production deployment guide
+    - [ ] E5.7 Final review-plan-phase audit
 ---
 
 # ESS — Eye of Sauron Service
@@ -73,6 +88,8 @@ This master plan is broken into three implementable deliverables:
 3. **[Log Scout: Syslog Search Agent](../backlog/ess-log-scout-syslog-agent.md)** — Standalone HTTP microservice on syslog servers, ripgrep search, ESS client adapter, per-host routing (30-40h)
 
 The **foundation** (Phase 1: trigger API, scheduler, config, Bedrock auth) and **orchestration** (Phase 3: ReAct loop, escalation, context management) remain in this master plan as they span all three tool verticals.
+
+Before the full multi-tool ESS is complete, this master plan now includes a narrowed shipping path: **Phase 1.5 — Self-Unattended and Inspectable Datadog Deliverable**. It pulls forward the minimum slices of orchestration, notification, and observability needed to ship a Datadog-only post-deploy watcher before Sentry and Log Scout are integrated.
 
 ---
 
@@ -166,6 +183,11 @@ Current runtime state:
 - Sentry integration, Log Scout integration, escalation policy, and Teams notification remain outside the current runtime path.
 
 This means ESS can already monitor a deployment window against Datadog alone, but the full multi-tool orchestrator from later phases is not complete yet.
+
+The next milestone is Phase 1.5: turning that Datadog-only monitor into a shippable first deliverable that is either:
+
+- **inspectable** through the session API and structured logs, with an optional debug-gated local trace when deeper inspection is needed
+- **unattended and still debuggable** when Teams delivery is enabled via config
 
 ---
 
@@ -419,6 +441,51 @@ the single credential to manage.
 
 ---
 
+### Decision 9: First-Ship Runtime Mode — Teams Gate, Debug Trace, and OpenTelemetry Forward Path
+
+For the narrowed first ship, ESS needs one runtime path with configurable
+notification delivery and a debug-only local trace bridge that can graduate into
+OpenTelemetry export in Phase 5 without rewriting the agent loop.
+
+| Concern | Teams-only mode | Always-on local trace mode | Teams gate + debug-only local trace bridge | Recommendation |
+|---|---|---|---|---|
+| Human alerting | Yes | No | Yes when enabled | Teams gate + debug-only local trace bridge |
+| Local inspectability | Weak | Strong | Strong when debug is enabled | Teams gate + debug-only local trace bridge |
+| Production data retention risk | Medium | High | Low by default | Teams gate + debug-only local trace bridge |
+| Path to OpenTelemetry | Weak | Weak | Strong | Teams gate + debug-only local trace bridge |
+| Scope fit for first ship | Good | Overreaches | Best | Teams gate + debug-only local trace bridge |
+
+**Verdict: Gate Teams with config, keep the local trace sink debug-only, and shape the instrumentation so Phase 5 can promote the same events into OpenTelemetry export.**
+
+Recommended configuration shape:
+
+- `ESS_TEAMS_ENABLED=false` → ESS performs no outbound Teams actions
+- `ESS_TEAMS_ENABLED=true` → ESS posts Teams notifications from the same runtime path
+- `ESS_DEBUG_TRACE_ENABLED=false` → default; ESS does not write a local trace file
+- `ESS_DEBUG_TRACE_ENABLED=true` → enable a local debug trace sink for the running process
+- `ESS_AGENT_TRACE_PATH=agent_trace.jsonl` → optional override; only honoured when `ESS_DEBUG_TRACE_ENABLED=true`
+
+The trace should capture the full **observable agent trace** for each cycle:
+
+- deploy/session context summary
+- Bedrock request/response envelopes
+- tool uses and validated tool inputs
+- tool results and normalised findings
+- fallback events
+- notification decisions and outcomes
+- final cycle and end-of-window summaries
+
+ESS should **not** treat raw private chain-of-thought as a stable logging surface. The supported trace is the agent's prompts, actions, tool evidence, assistant outputs, and final conclusions.
+
+Implementation constraint for Phase 1.5:
+
+- emit these records through a small instrumentation layer with typed event models
+- preserve timestamps, correlation IDs, parent/child relationships, and attributes in an OpenTelemetry-friendly shape
+- keep the local JSONL sink as a debug aid only
+- defer the Phase 5 decision about OTLP exporter destination, collector topology, and long-term storage
+
+---
+
 ## Detailed Phase Design
 
 ### Phase 1 — Foundation & Trigger API
@@ -450,7 +517,7 @@ ess/
 │   └── notifications/         # MS Teams publisher (Phase 4)
 ├── tests/
 ├── docs/
-│   ├── INDEX.md
+│   ├── README.md
 │   └── plans/
 └── .agents/skills/            # mirrored from log-ai
 ```
@@ -602,7 +669,155 @@ class ESSConfig(BaseSettings):
 
 - README with project overview and quickstart
 - AGENTS.md adapted from log-ai template
-- docs/INDEX.md with plan tracking
+- docs/README.md with plan tracking
+
+---
+
+### Phase 1.5 — Self-Unattended and Inspectable Datadog Deliverable
+
+**Goal**: Ship a narrowed first ESS deliverable that monitors a Datadog-backed deploy window for 30-60 minutes using the existing trigger API, scheduler, Pup integration, and Datadog agent loop, while supporting both inspectable and unattended operation.
+
+```mermaid
+flowchart LR
+    GL[GitLab Pipeline] -->|POST /api/v1/deploy| API[ESS Trigger API]
+    API --> SCHED[APScheduler Monitoring Window]
+    SCHED --> AGENT[Datadog Health-Check Agent]
+    AGENT --> PUP[Datadog Pup CLI]
+    AGENT -->|if ESS_DEBUG_TRACE_ENABLED=true| TRACE[agent_trace.jsonl debug sink]
+    AGENT -->|if ESS_TEAMS_ENABLED=true| TEAMS[MS Teams Webhook]
+    API --> STATUS[Session Status API]
+```
+
+This phase deliberately pulls forward the minimum viable slices of Phases 3, 4,
+and 5 needed to ship a useful Datadog-only watcher before Sentry and Log Scout
+are integrated.
+
+#### E15.1 — Datadog-only health-check agent loop
+
+Build on the existing Datadog-only Bedrock tool loop so each scheduler tick:
+
+1. builds deploy-aware prompts from the trigger payload
+2. executes Datadog tool calls through the Bedrock tool layer
+3. falls back to deterministic Pup triage if the LLM path fails
+4. produces a `HealthCheckResult` stored on the in-memory session
+
+Deliverables:
+
+- Datadog-only agent loop in `src/agent/health_check_agent.py`
+- wiring from `src/main.py` into scheduler-driven monitoring
+- session visibility via `GET /api/v1/deploy/{job_id}`
+
+Verification:
+
+- repeated checks execute for the full monitoring window
+- failures in the LLM path do not break monitoring
+- latest result remains inspectable through the API
+
+#### E15.2 — Debug-gated local trace bridge
+
+Add a debug-only local trace sink at the project root, defaulting to
+`agent_trace.jsonl`, as a bridge toward later OpenTelemetry-based observability.
+
+Required behavior:
+
+- `ESS_DEBUG_TRACE_ENABLED=false` is the default and writes no local trace file
+- `ESS_DEBUG_TRACE_ENABLED=true` enables the local debug trace sink
+- `ESS_AGENT_TRACE_PATH` is optional and is only used when debug tracing is enabled
+- the local sink is fed by a dedicated instrumentation layer rather than agent business logic writing JSONL directly
+- trace event envelopes use typed models and an OpenTelemetry-friendly shape so Phase 5 can replace or augment the file sink without a big-bang rewrite
+
+Trace events must include at least:
+
+- cycle started / completed
+- Bedrock request metadata and assistant outputs
+- tool uses, validated inputs, and tool results
+- per-cycle findings and severities
+- fallback events and errors
+- notification attempts and outcomes
+- end-of-window summary
+
+Design constraint:
+
+- trace the full **observable execution path**
+- do **not** rely on raw chain-of-thought as a product surface
+- keep the local file sink debug-only rather than making it a permanent production observability surface
+- preserve timestamps, correlation identifiers, and parent/child execution relationships needed for later OpenTelemetry export
+
+Verification:
+
+- when debug tracing is disabled, no local trace file is written
+- when debug tracing is enabled, one monitoring session produces a readable chronological event stream at the project root
+- operators can reconstruct what the agent did without polling the API continuously when debug tracing is enabled
+- the instrumentation seam is reusable by Phase 5 observability work without changing agent orchestration logic
+
+#### E15.3 — Teams mode gate and completion callback
+
+Pull forward the minimal notification path from Phase 4 using config-driven mode selection.
+
+Required behavior:
+
+- `ESS_TEAMS_ENABLED=false` disables outbound Teams posts entirely
+- `ESS_TEAMS_ENABLED=true` enables Teams notifications for the same runtime path
+- `ESS_DEBUG_TRACE_ENABLED` only controls the local debug sink and does not change notification policy
+- completion callback in `src/main.py` becomes real instead of stubbed
+- webhook URL comes from trigger payload or default config
+- Teams delivery uses bounded async HTTP calls with explicit timeouts; richer retry policy remains Phase 4 work
+
+Verification:
+
+- Teams-disabled mode performs no network calls to Teams
+- debug tracing can be enabled or disabled independently of Teams mode
+- Teams-enabled mode attempts webhook delivery through the same cycle results
+
+#### E15.4 — Minimal unattended notification policy
+
+Implement the smallest useful unattended policy for the Datadog-only ship:
+
+- immediate notification for `CRITICAL`
+- notification after repeated `WARNING` cycles
+- final summary at end of monitoring window
+
+This phase only needs minimal card/report content for Datadog-only monitoring.
+Advanced threaded investigations and multi-tool correlation remain in later phases.
+
+Implementation note:
+
+- notification decisions and delivery outcomes should flow through the same instrumentation layer used by the debug trace sink so Phase 5 can export them as OpenTelemetry events later
+
+Verification:
+
+- warning, critical, and summary paths are independently testable
+- notification failures are logged into the structured trace
+
+#### E15.5 — Datadog-only shipping validation
+
+Validate the narrowed ship path with realistic GitLab-style payloads and monitoring windows.
+
+Scope:
+
+- example trigger payloads for 30-minute and 60-minute windows
+- local runbook for triggering ESS from a GitLab-compatible curl payload
+- targeted integration coverage for Datadog-only scheduling plus notification/trace behavior
+
+Verification:
+
+- a single trigger can monitor the service for the configured window without human polling
+- trace-only and Teams-enabled modes both complete successfully
+
+#### E15.6 — Documentation for the narrowed first ship
+
+Add a Datadog-only shipping guide covering:
+
+- required `.env` variables
+- mode behavior (`ESS_TEAMS_ENABLED` false vs true)
+- debug trace behavior (`ESS_DEBUG_TRACE_ENABLED` and optional `ESS_AGENT_TRACE_PATH`)
+- trace event shape and how it maps cleanly to later OpenTelemetry export
+- what the API exposes during the monitoring window
+- what is intentionally out of scope (Sentry, Log Scout, advanced multi-tool investigation)
+
+#### E15.7 — Review gate
+
+Run `review-plan-phase` against Phase 1.5 before considering the narrowed first ship complete.
 
 ---
 
@@ -751,6 +966,10 @@ with real Datadog/Sentry (marked `@pytest.mark.integration`).
 **Goal**: An LLM-driven reasoning loop that runs health checks, detects anomalies,
 investigates root cause, and produces actionable reports.
 
+Phase 1.5 pulls forward the Datadog-only slice of this work. Phase 3 remains the
+place for the **full multi-tool orchestrator** spanning Datadog, Sentry, and Log Scout,
+with richer escalation, context management, and correlation behavior.
+
 #### E3.1 — Agent orchestrator
 
 Classic ReAct tool-calling loop:
@@ -894,6 +1113,10 @@ Strategy:
 
 **Goal**: ESS posts clear, actionable health reports to MS Teams.
 
+Phase 1.5 pulls forward the minimal Datadog-only unattended notification path.
+Phase 4 remains the place for richer card design, threaded investigation updates,
+and broader multi-tool reporting.
+
 #### E4.1 — MS Teams webhook publisher
 
 ```python
@@ -942,6 +1165,10 @@ Cards include:
 ### Phase 5 — Deployment, Observability & Hardening
 
 **Goal**: ESS is containerised, observable, and ready for production.
+
+Phase 1.5 pulls forward the root-level structured agent trace and the narrowed
+Datadog-only end-to-end shipping path. Phase 5 still covers broader production
+hardening, self-observability metrics, deployment packaging, and final audits.
 
 #### E5.1 — Docker
 
@@ -1007,6 +1234,7 @@ notify_ess:
 - `/health` endpoint for container orchestrator probes
 - `/api/v1/status` — list active monitoring sessions
 - Metrics: active_sessions, checks_executed, alerts_sent, tool_call_duration
+- Decide the OpenTelemetry export path for the Phase 1.5 instrumentation layer (exporter destination, collector topology, and whether the debug JSONL sink remains as a local-only fallback)
 
 #### E5.4 — Rate limiting and circuit breakers
 
@@ -1087,7 +1315,20 @@ notify_ess:
 
 ## Success Criteria
 
+### Narrowed First Ship — Phase 1.5
+
 - [ ] A GitLab pipeline can trigger ESS with a single curl command
+- [ ] ESS monitors the Datadog-backed service for the full configured 30-60 minute window
+- [ ] The Datadog-only agent loop produces coherent per-cycle health results without human polling
+- [ ] When `ESS_DEBUG_TRACE_ENABLED=true`, a structured local trace records prompts, tool actions, findings, assistant outputs, and final summaries for every cycle
+- [ ] When `ESS_DEBUG_TRACE_ENABLED=false`, ESS writes no local trace file and remains inspectable through the session API and structured logs
+- [ ] The Phase 1.5 instrumentation layer preserves an OpenTelemetry-friendly event model so Phase 5 can add exporters without rewriting agent logic
+- [ ] When `ESS_TEAMS_ENABLED=false`, ESS performs no Teams actions
+- [ ] When `ESS_TEAMS_ENABLED=true`, ESS sends warning, critical, and end-of-window notifications to Teams
+- [ ] ESS does NOT take any remediation actions — observation and reporting only
+
+### Full ESS Target
+
 - [ ] ESS correctly queries Datadog via Pup CLI (monitors, logs, APM) for the deployed service
 - [ ] ESS correctly queries Sentry for new issues since deploy time
 - [ ] ESS correctly searches raw logs for error patterns post-deploy
@@ -1095,5 +1336,4 @@ notify_ess:
 - [ ] MS Teams receives a rich adaptive card within 2 minutes of the first health check
 - [ ] If no issues are found across the monitoring window, a summary confirmation is posted
 - [ ] If issues are found, the agent autonomously investigates and posts a detailed report
-- [ ] ESS does NOT take any remediation actions — observation and reporting only
 - [ ] The service runs containerised and can be deployed via docker-compose or k8s

@@ -16,6 +16,7 @@ tables and rationale.
 | 6 | Job scheduler | APScheduler (AsyncIOScheduler) | Dynamic jobs, async, minimal config, perfect for "every N min for M min" |
 | 7 | Notifications | MS Teams incoming webhook | Adaptive Cards, zero setup, webhook URL is the only secret |
 | 8 | LLM auth | Bedrock bearer token (ABSK) | Consistent with Vellum/Wellspring stack, single token to manage |
+| 9 | First-ship runtime mode | Teams gated by env; local trace sink only in debug mode with an OpenTelemetry-aligned event model | Keeps the narrowed Datadog-only ship inspectable without making a local file trace the permanent observability surface |
 
 ## LLM Model Selection
 

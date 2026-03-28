@@ -24,7 +24,7 @@
 
 | # | Plan | Status | Est. Hours |
 |---|------|--------|------------|
-| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Datadog-only Phase 3 slice in progress | 80-120h |
+| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Phase 1.5 next (Datadog-only unattended/inspectable ship) | 80-120h |
 | 2 | **Datadog Pup CLI Integration** ([plan](plans/active/ess-datadog-pup-integration.md)) | D1 ✅ D2 ✅ D3 ✅ | 25-35h |
 
 ### Deliverable Plans (Backlog)
