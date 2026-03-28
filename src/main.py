@@ -23,7 +23,9 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from src.agent.health_check_agent import DatadogHealthCheckAgent
 from src.config import ESSConfig
+from src.llm_client import make_triage_client
 from src.models import (
     CancelResponse,
     DeployResponse,
@@ -71,6 +73,11 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     cfg = config or ESSConfig()
     scheduler = ESSScheduler(max_sessions=cfg.max_concurrent_sessions)
     pup_tool = PupTool(config=cfg)
+    triage_client = make_triage_client(cfg)
+    datadog_agent = DatadogHealthCheckAgent(
+        bedrock_client=triage_client,
+        pup_tool=pup_tool,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
@@ -91,6 +98,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     # Store shared state on the app instance for access in route handlers.
     app.state.config = cfg
     app.state.scheduler = scheduler
+    app.state.datadog_agent = datadog_agent
 
     # -----------------------------------------------------------------------
     # Exception handlers
@@ -160,7 +168,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
             await scheduler.schedule_monitoring(
                 job_id=job_id,
                 deploy=payload,
-                health_check_fn=_build_pup_health_check(pup_tool),
+                health_check_fn=datadog_agent.run_health_check,
                 on_complete_fn=_stub_on_complete,
             )
         except ValueError as exc:

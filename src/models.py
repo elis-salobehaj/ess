@@ -89,6 +89,15 @@ class ServiceTarget(BaseModel):
             raise ValueError("sentry_dsn must start with https://")
         return v
 
+    @field_validator("infrastructure", mode="before")
+    @classmethod
+    def _normalise_infrastructure(cls, v: Infrastructure | str) -> Infrastructure | str:
+        if isinstance(v, Infrastructure):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower().replace("_", "-").replace(" ", "-")
+        return v
+
 
 class MonitoringConfig(BaseModel):
     """Timing and notification config for this monitoring session."""

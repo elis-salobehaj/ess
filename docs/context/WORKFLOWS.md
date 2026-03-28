@@ -10,13 +10,23 @@
 3. ESS validates the payload, returns `202 Accepted` with job ID
 4. APScheduler creates an interval job for the monitoring window
 5. Job ticks every `check_interval_minutes` until `window_minutes` expires
-6. On window expiry, job auto-removes and posts summary to Teams
+6. On window expiry, job auto-removes; Teams summary posting is still future work
 
 ## Health-Check Cycle (per tick)
 
 Each scheduler tick runs one health-check cycle across all services:
 
-### Triage (always runs, Haiku 4.5)
+### Current Runtime Path (Datadog-only)
+
+For each scheduler tick:
+
+1. ESS builds a Datadog-specific Bedrock system prompt and user prompt from the deploy context
+2. Bedrock can call Datadog tools through the D3 tool layer (`DATADOG_TOOL_CONFIG`)
+3. Tool calls are dispatched to `PupTool` and normalised into `ToolResult`
+4. The resulting findings are stored on the in-memory monitoring session
+5. If the Bedrock path fails or returns no tool calls, ESS falls back to deterministic Datadog triage for that cycle
+
+### Target Triage (full multi-tool design)
 
 For each service in the trigger:
 1. Check Datadog monitors → any alerting/warning?
@@ -48,11 +58,11 @@ For each service in the trigger:
 
 ## Notification Pipeline
 
-1. Health check produces structured report
-2. Report mapped to Adaptive Card template (all-clear, issue, summary)
-3. Card POSTed to Teams webhook URL
-4. Retry with exponential backoff (3 attempts: 1s, 2s, 4s)
-5. On persistent failure: log error, continue monitoring
+1. Current state: health checks produce structured results stored on the session object and exposed via `GET /api/v1/deploy/{job_id}`
+2. Target state: report mapped to Adaptive Card template (all-clear, issue, summary)
+3. Target state: card POSTed to Teams webhook URL
+4. Target state: retry with exponential backoff (3 attempts: 1s, 2s, 4s)
+5. Target state: on persistent failure, log error and continue monitoring
 
 ## Documentation Practices
 

@@ -4,7 +4,7 @@ status: active
 priority: high
 estimated_hours: 80-120
 created: 2026-03-22
-date_updated: 2026-03-23
+date_updated: 2026-03-28
 related_files:
   - src/main.py
   - src/config.py
@@ -155,6 +155,17 @@ The key insight is that ESS does **not** remediate. It watches, investigates, an
 reports. The agent's job is to correlate signals across observability platforms,
 understand what went wrong post-deploy, and present a clear, actionable summary
 to the engineering team.
+
+## Progress Note — 2026-03-28
+
+Current runtime state:
+
+- Trigger API, scheduler, Datadog Pup adapter, Docker packaging, and Datadog D3 tool definitions are implemented.
+- The live health-check path now uses a Datadog-only Bedrock tool loop with deterministic Pup fallback.
+- Session results are visible through the API, including `latest_result` on `GET /api/v1/deploy/{job_id}`.
+- Sentry integration, Log Scout integration, escalation policy, and Teams notification remain outside the current runtime path.
+
+This means ESS can already monitor a deployment window against Datadog alone, but the full multi-tool orchestrator from later phases is not complete yet.
 
 ---
 

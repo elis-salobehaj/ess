@@ -4,19 +4,22 @@ status: active
 priority: high
 estimated_hours: 25-35
 created: 2026-03-22
-date_updated: 2026-03-24
+date_updated: 2026-03-28
 parent_plan: plans/active/ess-eye-of-sauron-service.md
 related_files:
     - src/main.py
-  - src/tools/pup_tool.py
-  - src/tools/normalise.py
-  - src/config.py
-  - src/models.py
+    - src/agent/datadog_tools.py
+    - src/tools/pup_tool.py
+    - src/tools/normalise.py
+    - src/config.py
+    - src/models.py
     - tests/test_trigger.py
     - tests/test_main.py
-  - tests/test_pup_tool.py
-  - Dockerfile
-  - .dockerignore
+    - tests/test_pup_tool.py
+    - tests/test_datadog_tools.py
+    - Dockerfile
+    - .dockerignore
+    - docs/guides/DATADOG_AGENT_TOOLS.md
     - docs/guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md
 tags:
   - ess
@@ -39,11 +42,11 @@ completion:
   - [x] D2.5 Integration test with real Datadog (marked @pytest.mark.integration)
   - [x] D2.6 Expose latest health-check findings on session status endpoint
   - "# Phase D3 — Agent Tool Definitions"
-  - [ ] D3.1 Define Bedrock-compatible tool schemas for Pup commands
-  - [ ] D3.2 Map tool results to ToolResult normalised format
-  - [ ] D3.3 Write system-prompt fragments for Datadog tool usage
-  - [ ] D3.4 End-to-end test — mock LLM calls Pup tools
-  - [ ] D3.5 Documentation — Pup tool integration guide
+    - [x] D3.1 Define Bedrock-compatible tool schemas for Pup commands
+    - [x] D3.2 Map tool results to ToolResult normalised format
+    - [x] D3.3 Write system-prompt fragments for Datadog tool usage
+    - [x] D3.4 End-to-end test — mock LLM calls Pup tools
+    - [x] D3.5 Documentation — Pup tool integration guide
 ---
 
 # ESS Deliverable 1 — Datadog Pup CLI Integration
@@ -669,6 +672,16 @@ When checking Datadog, always use the `datadog_service_name` from the deploy
 context, not the log service name. These may differ (e.g., log name
 "hub-ca-auth" → Datadog name "example-auth-service").
 ```
+
+### D3 Progress Note — 2026-03-28
+
+Initial D3 implementation landed with:
+
+- `src/agent/datadog_tools.py` for Bedrock tool schemas, prompt fragments, and validated dispatch to `PupTool`
+- `tests/test_datadog_tools.py` for schema, validation, and mocked Bedrock tool-use coverage
+- `docs/guides/DATADOG_AGENT_TOOLS.md` for developer-facing usage guidance
+
+Phase D3 passed review in [docs/plans/review-reports/phase-D3-review-2026-03-28-n6q4.md](../review-reports/phase-D3-review-2026-03-28-n6q4.md), so the checklist is now marked complete.
 
 ---
 

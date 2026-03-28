@@ -1,0 +1,33 @@
+{
+    "deployment": {
+        "gitlab_pipeline_id": "qa-e2e-20260324-001",
+        "gitlab_project": "pason/well-service",
+        "commit_sha": "abc1234def567890abc1234def567890abc1234",
+        "deployed_by": "github-copilot",
+        "deployed_at": "2026-03-24T14:05:00Z",
+        "environment": "qa",
+        "regions": [
+            "qa"
+        ]
+    },
+    "services": [
+        {
+            "name": "pason-well-service",
+            "datadog_service_name": "pason-well-service",
+            "infrastructure": "ECS Fargate"
+        }
+    ],
+    "monitoring": {
+        "window_minutes": 2,
+        "check_interval_minutes": 1
+    },
+    "extra_context": {
+        "scenario": "manual-end-to-end-datadog-pup-validation",
+        "notes": [
+            "Datadog monitors tagged service:pason-well-service,env:qa returned none at test setup time.",
+            "Datadog logs search for service:pason-well-service status:error over the last 30m returned no results at test setup time.",
+            "APM stats for qa include pason-well-service with servlet.request traffic.",
+            "APM operations observed: servlet.request, jakarta_rs.request, mysql.query, okhttp.request, http.request."
+        ]
+    }
+}

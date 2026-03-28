@@ -71,6 +71,16 @@ class TestServiceTarget:
         )
         assert s.infrastructure == Infrastructure.K8S  # default
 
+    def test_human_friendly_infrastructure_is_normalised(self) -> None:
+        s = ServiceTarget.model_validate(
+            {
+                "name": "hub-ca-auth",
+                "datadog_service_name": "example-auth",
+                "infrastructure": "ECS Fargate",
+            }
+        )
+        assert s.infrastructure == Infrastructure.ECS_FARGATE
+
     def test_invalid_sentry_dsn_raises(self) -> None:
         with pytest.raises(ValidationError):
             ServiceTarget.model_validate(
