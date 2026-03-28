@@ -7,7 +7,11 @@ making any real AWS calls.
 from __future__ import annotations
 
 import json
+from unittest.mock import sentinel
 
+import pytest
+
+from src.config import ESSConfig
 from src.llm_client import (
     BedrockClient,
     build_assistant_message,
@@ -123,9 +127,37 @@ class TestBuildAssistantMessage:
 
 
 class TestClientFactory:
+    def test_bedrock_client_uses_native_bearer_auth(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_client(**kwargs):
+            captured.update(kwargs)
+            return sentinel.client
+
+        monkeypatch.setattr("src.llm_client.boto3.client", _fake_client)
+
+        config = ESSConfig(
+            _env_file=None,
+            aws_bearer_token_bedrock="ABSKexampletoken",
+            aws_bedrock_region="us-west-2",
+            dd_api_key="k",
+            dd_app_key="a",
+            sentry_auth_token="s",
+        )
+        client = make_triage_client(config)
+
+        assert client._get_client() is sentinel.client
+        assert captured["service_name"] == "bedrock-runtime"
+        assert captured["region_name"] == "us-west-2"
+        assert "aws_access_key_id" not in captured
+        assert "aws_secret_access_key" not in captured
+
     def test_triage_client_uses_correct_model(self, minimal_config) -> None:
         client = make_triage_client(minimal_config)
-        assert "haiku" in client._model_id.lower()
+        assert "sonnet" in client._model_id.lower()
 
     def test_investigation_client_uses_correct_model(self, minimal_config) -> None:
         client = make_investigation_client(minimal_config)

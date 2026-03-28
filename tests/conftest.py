@@ -16,6 +16,7 @@ def minimal_config() -> ESSConfig:
     Bypasses the env-file lookup by passing everything directly.
     """
     return ESSConfig(
+        _env_file=None,
         aws_bearer_token_bedrock="",
         aws_bedrock_region="us-east-1",
         aws_ec2_metadata_disabled=False,

@@ -10,6 +10,8 @@ The implementation lives in `src/agent/datadog_tools.py` and provides three thin
 
 At runtime, these definitions are now consumed by `src/agent/health_check_agent.py`, which runs the first Datadog-only Bedrock tool loop for each monitoring cycle and falls back to deterministic Pup triage if the LLM path fails.
 
+The live runtime currently uses Claude Sonnet 4.6 for both the initial Datadog triage turn and any deeper Datadog investigation turns within the same cycle.
+
 ## Supported Datadog tools
 
 - `datadog_monitor_status`
@@ -21,7 +23,7 @@ At runtime, these definitions are now consumed by `src/agent/health_check_agent.
 
 These map to the existing `PupTool` triage and investigation helpers. Tool inputs are validated with Pydantic before a Pup subprocess is executed.
 
-The repository also includes a realistic trigger example at `docs/examples/triggers/pason-well-service-qa-e2e.json`. The D3 test suite uses that payload to verify the Datadog prompt fragment and mocked Bedrock tool loop against a real deploy shape instead of only synthetic strings.
+The repository also includes a realistic trigger example at `docs/examples/triggers/example-service-e2e.json`. The D3 test suite uses that payload to verify the Datadog prompt fragment and mocked Bedrock tool loop against a real deploy shape instead of only synthetic strings.
 
 ## Typical usage
 
@@ -52,6 +54,7 @@ messages.extend(tool_messages)
 - The Bedrock-facing tool names use underscore-separated names such as `datadog_monitor_status`.
 - Normalised ESS tool results continue to use dot-namespaced identifiers such as `datadog.monitor_status`.
 - Invalid model-supplied inputs return an error `ToolResult` and an error-status Bedrock `toolResult` message.
+- Multiple tool results from a Bedrock turn are aggregated back into a single user message because Bedrock expects one `toolResult` message containing all tool-result blocks for the turn.
 - The prompt fragment explicitly tells the model to use `datadog_service_name`, not the log service name.
 - The tool layer is observation-only. It never performs remediation actions.
 

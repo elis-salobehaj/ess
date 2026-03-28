@@ -54,6 +54,7 @@ class MonitoringSession:
 # Type alias for the health-check callback injected by the FastAPI app layer.
 HealthCheckFn = Callable[[MonitoringSession], Awaitable[HealthCheckResult]]
 CompletionFn = Callable[[MonitoringSession], Awaitable[None]]
+ResultFn = Callable[[MonitoringSession, HealthCheckResult], Awaitable[None]]
 
 
 class ESSScheduler:
@@ -95,6 +96,7 @@ class ESSScheduler:
         deploy: DeployTrigger,
         health_check_fn: HealthCheckFn,
         on_complete_fn: CompletionFn,
+        on_result_fn: ResultFn | None = None,
     ) -> MonitoringSession:
         """Create a new interval job for this deployment.
 
@@ -134,7 +136,7 @@ class ESSScheduler:
             trigger=IntervalTrigger(minutes=interval),
             id=job_id,
             end_date=end_time,
-            args=[job_id, health_check_fn, on_complete_fn, end_time],
+            args=[job_id, health_check_fn, on_complete_fn, end_time, on_result_fn],
             max_instances=1,
             coalesce=True,
             misfire_grace_time=60,
@@ -183,6 +185,7 @@ class ESSScheduler:
         health_check_fn: HealthCheckFn,
         on_complete_fn: CompletionFn,
         end_time: datetime,
+        on_result_fn: ResultFn | None = None,
     ) -> None:
         session = self._sessions.get(job_id)
         if session is None or session.status in ("cancelled", "completed", "error"):
@@ -201,6 +204,17 @@ class ESSScheduler:
                 next_at = now + timedelta(minutes=interval)
                 session.next_check_at = next_at if next_at < end_time else None
                 session.status = "running"
+
+            if on_result_fn is not None:
+                try:
+                    await on_result_fn(session, result)
+                except Exception as exc:
+                    logger.exception(
+                        "Result callback failed",
+                        job_id=job_id,
+                        cycle=cycle,
+                        error=str(exc),
+                    )
         except Exception as exc:
             logger.exception(
                 "Health check failed",
@@ -255,7 +269,12 @@ class ESSScheduler:
         """Return the worst severity seen across all check results."""
         if not session.results:
             return HealthSeverity.UNKNOWN.value
-        order = [HealthSeverity.HEALTHY, HealthSeverity.WARNING, HealthSeverity.CRITICAL]
+        order = [
+            HealthSeverity.HEALTHY,
+            HealthSeverity.WARNING,
+            HealthSeverity.CRITICAL,
+            HealthSeverity.UNKNOWN,
+        ]
         worst = HealthSeverity.HEALTHY
         for result in session.results:
             if order.index(result.overall_severity) > order.index(worst):

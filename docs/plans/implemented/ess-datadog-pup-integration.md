@@ -1,6 +1,6 @@
 ---
 title: "ESS Deliverable 1 — Datadog Pup CLI Integration"
-status: active
+status: implemented
 priority: high
 estimated_hours: 25-35
 created: 2026-03-22
@@ -51,7 +51,7 @@ completion:
 
 # ESS Deliverable 1 — Datadog Pup CLI Integration
 
-> Extracted from the [ESS master plan](ess-eye-of-sauron-service.md). This
+> Extracted from the [ESS master plan](../active/ess-eye-of-sauron-service.md). This
 > deliverable covers everything needed for ESS to query Datadog via the Pup CLI.
 
 ## Scope
@@ -156,13 +156,7 @@ class PupTool:
             )
 
         async with self._semaphore:
-            env = {
-                **os.environ,
-                "DD_API_KEY": self.config.dd_api_key,
-                "DD_APP_KEY": self.config.dd_app_key,
-                "DD_SITE": self.config.dd_site,
-                "FORCE_AGENT_MODE": "1",
-            }
+            env = self.config.pup_subprocess_environment()
 
             import time
             start = time.monotonic()
@@ -468,12 +462,12 @@ Example response shape:
             {
                 "tool": "datadog.apm_stats",
                 "severity": "HEALTHY",
-                "summary": "example-well-service: Pup apm_stats returned successfully"
+                "summary": "example-service: Pup apm_stats returned successfully"
             }
         ],
-        "services_checked": ["example-well-service"],
+        "services_checked": ["example-service"],
         "raw_tool_outputs": {
-            "example-well-service:datadog.apm_stats": {
+            "example-service:datadog.apm_stats": {
                 "success": true,
                 "summary": "Pup apm_stats returned successfully"
             }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.agent.health_check_agent import DatadogHealthCheckAgent
+from src.agent.trace import AgentTraceRecorder
 from src.models import DeployTrigger, HealthSeverity
 from src.scheduler import MonitoringSession
 from src.tools.pup_tool import PupResult
@@ -19,7 +21,7 @@ _EXAMPLE_TRIGGER_PATH = (
     / "docs"
     / "examples"
     / "triggers"
-    / "pason-well-service-qa-e2e.json"
+    / "example-service-e2e.json"
 )
 
 
@@ -93,7 +95,7 @@ class TestDatadogHealthCheckAgent:
                                         "toolUseId": "tu-1",
                                         "name": "datadog_monitor_status",
                                         "input": {
-                                            "service": "pason-well-service",
+                                            "service": "example-service",
                                             "environment": "qa",
                                         },
                                     }
@@ -103,7 +105,7 @@ class TestDatadogHealthCheckAgent:
                                         "toolUseId": "tu-2",
                                         "name": "datadog_error_logs",
                                         "input": {
-                                            "service": "pason-well-service",
+                                            "service": "example-service",
                                             "minutes_back": 10,
                                         },
                                     }
@@ -132,12 +134,12 @@ class TestDatadogHealthCheckAgent:
         assert result.job_id == session.job_id
         assert result.cycle_number == 1
         assert result.overall_severity == HealthSeverity.HEALTHY
-        assert result.services_checked == ["pason-well-service"]
+        assert result.services_checked == ["example-service"]
         assert any(finding.tool == "agent.summary" for finding in result.findings)
         assert any(finding.tool == "datadog.monitor_status" for finding in result.findings)
         assert "agent.summary" in result.raw_tool_outputs
-        pup_tool.get_monitor_status.assert_awaited_once_with("pason-well-service", "qa")
-        pup_tool.search_error_logs.assert_awaited_once_with("pason-well-service", minutes=10)
+        pup_tool.get_monitor_status.assert_awaited_once_with("example-service", "qa")
+        pup_tool.search_error_logs.assert_awaited_once_with("example-service", minutes=10)
 
     @pytest.mark.asyncio
     async def test_falls_back_to_deterministic_triage_when_bedrock_fails(self) -> None:
@@ -152,9 +154,9 @@ class TestDatadogHealthCheckAgent:
         assert result.findings[0].tool == "agent.fallback"
         assert "bedrock unavailable" in (result.findings[0].details or "")
         assert "agent.fallback" in result.raw_tool_outputs
-        pup_tool.get_monitor_status.assert_awaited_once_with("pason-well-service", "qa")
-        pup_tool.search_error_logs.assert_awaited_once_with("pason-well-service")
-        pup_tool.get_apm_stats.assert_awaited_once_with("pason-well-service", "qa")
+        pup_tool.get_monitor_status.assert_awaited_once_with("example-service", "qa")
+        pup_tool.search_error_logs.assert_awaited_once_with("example-service")
+        pup_tool.get_apm_stats.assert_awaited_once_with("example-service", "qa")
 
     @pytest.mark.asyncio
     async def test_falls_back_when_model_returns_no_tool_calls(self) -> None:
@@ -176,3 +178,62 @@ class TestDatadogHealthCheckAgent:
 
         assert result.findings[0].tool == "agent.fallback"
         assert "looks healthy" in (result.findings[0].details or "")
+
+    @pytest.mark.asyncio
+    async def test_writes_debug_trace_events_when_enabled(self, tmp_path) -> None:
+        session = _session()
+        pup_tool = _mock_pup_tool()
+        trace_path = tmp_path / "agent_trace.jsonl"
+        trace_recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        bedrock_client = _FakeBedrockClient(
+            responses=[
+                {
+                    "output": {
+                        "message": {
+                            "content": [
+                                {
+                                    "toolUse": {
+                                        "toolUseId": "tu-1",
+                                        "name": "datadog_monitor_status",
+                                        "input": {
+                                            "service": "example-service",
+                                            "environment": "qa",
+                                        },
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "stopReason": "tool_use",
+                },
+                {
+                    "output": {
+                        "message": {
+                            "content": [
+                                {"text": "Severity: HEALTHY\nNo Datadog anomalies detected."}
+                            ]
+                        }
+                    },
+                    "stopReason": "end_turn",
+                },
+            ]
+        )
+
+        agent = DatadogHealthCheckAgent(
+            bedrock_client=bedrock_client,
+            pup_tool=pup_tool,
+            trace_recorder=trace_recorder,
+        )
+
+        await agent.run_health_check(session)
+
+        session_trace_path = trace_recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        event_types = [event["event_type"] for event in events]
+
+        assert "cycle.started" in event_types
+        assert "bedrock.request" in event_types
+        assert "bedrock.response" in event_types
+        assert "tool.use" in event_types
+        assert "tool.result" in event_types
+        assert "cycle.completed" in event_types

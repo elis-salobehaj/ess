@@ -26,7 +26,7 @@ _EXAMPLE_TRIGGER_PATH = (
     / "docs"
     / "examples"
     / "triggers"
-    / "pason-well-service-qa-e2e.json"
+    / "example-service-e2e.json"
 )
 
 
@@ -130,7 +130,7 @@ class TestBuildDatadogToolPromptFragment:
 
         fragment = build_datadog_tool_prompt_fragment(trigger.services)
 
-        assert "pason-well-service" in fragment
+        assert "example-service" in fragment
         assert "Datadog service mappings for this deployment" in fragment
 
 
@@ -301,7 +301,7 @@ class TestExecuteDatadogToolUses:
         assert results[1].tool == "datadog.error_logs"
         assert conversation[1]["role"] == "assistant"
         assert conversation[2]["content"][0]["toolResult"]["toolUseId"] == "tu-100"
-        assert conversation[3]["content"][0]["toolResult"]["toolUseId"] == "tu-101"
+        assert conversation[2]["content"][1]["toolResult"]["toolUseId"] == "tu-101"
         pup_tool.search_error_logs.assert_awaited_once_with(
             "example-auth-service",
             minutes=15,
@@ -353,12 +353,12 @@ class TestExecuteDatadogToolUses:
             *tool_messages,
         ]
 
-        assert "pason-well-service" in prompt_fragment
+        assert "example-service" in prompt_fragment
         assert len(results) == 2
         assert results[0].tool == "datadog.monitor_status"
         assert results[1].tool == "datadog.apm_stats"
         assert conversation[2]["content"][0]["toolResult"]["toolUseId"] == "tu-200"
-        assert conversation[3]["content"][0]["toolResult"]["toolUseId"] == "tu-201"
+        assert conversation[2]["content"][1]["toolResult"]["toolUseId"] == "tu-201"
         pup_tool.get_monitor_status.assert_awaited_once_with(
             service.datadog_service_name,
             environment,

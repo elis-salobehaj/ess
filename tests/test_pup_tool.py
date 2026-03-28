@@ -35,6 +35,7 @@ from src.tools.pup_tool import PupResult, PupTool
 def _cfg() -> ESSConfig:
     """Minimal ESSConfig for unit tests — no real credentials needed."""
     return ESSConfig(
+        _env_file=None,
         dd_api_key="test-api-key",
         dd_app_key="test-app-key",
         dd_site="datadoghq.com",

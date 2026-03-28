@@ -139,7 +139,7 @@ class TestGetSession:
                     HealthFinding(
                         tool="datadog.error_logs",
                         severity=HealthSeverity.WARNING,
-                        summary="example-well-service: recent error logs found",
+                        summary="example-service: recent error logs found",
                     )
                 ],
                 services_checked=["hub-ca-auth"],

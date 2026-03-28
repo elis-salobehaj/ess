@@ -36,12 +36,12 @@ completion:
     - [x] E1.7 Documentation — README, AGENTS.md, docs/README.md
     - "# Phase 1.5 — Self-Unattended and Inspectable Datadog Deliverable"
     - [x] E15.1 Ship Datadog-only Bedrock tool loop with deterministic Pup fallback
-    - [ ] E15.2 Add debug-gated local trace sink with OpenTelemetry-aligned event model
-    - [ ] E15.3 Add Teams-mode config gate and real completion callback
-    - [ ] E15.4 Implement warning, critical, and end-of-window notification policy
-    - [ ] E15.5 Validate GitLab-triggered Datadog-only monitoring for 30-60 minute windows
-    - [ ] E15.6 Documentation — Datadog-only unattended and inspectable ship guide
-    - [ ] E15.7 review-plan-phase audit for the narrowed first ship
+    - [x] E15.2 Add debug-gated local trace sink with OpenTelemetry-aligned event model
+    - [x] E15.3 Add Teams-mode config gate and real completion callback
+    - [x] E15.4 Implement warning, critical, and end-of-window notification policy
+    - [x] E15.5 Validate GitLab-triggered Datadog-only monitoring for 30-60 minute windows
+    - [x] E15.6 Documentation — Datadog-only unattended and inspectable ship guide
+    - [x] E15.7 review-plan-phase audit for the narrowed first ship
     - "# Phase 2 — Tool Integration Layer"
     - [x] E2.1 Integrate Datadog Pup CLI as subprocess tool executor
     - [ ] E2.2 Integrate Sentry MCP server as stdio tool executor
@@ -83,7 +83,7 @@ completion:
 
 This master plan is broken into three implementable deliverables:
 
-1. **[Datadog Pup CLI Integration](ess-datadog-pup-integration.md)** — PupTool adapter, health-check and investigation methods, Bedrock tool schemas, Docker install, circuit breaker (25-35h)
+1. **[Datadog Pup CLI Integration](../implemented/ess-datadog-pup-integration.md)** — PupTool adapter, health-check and investigation methods, Bedrock tool schemas, Docker install, circuit breaker (25-35h)
 2. **[Sentry Integration](../backlog/ess-sentry-integration.md)** — REST API client (ported from log-ai), issue/trace queries, 429 backoff, future MCP upgrade path (20-30h)
 3. **[Log Scout: Syslog Search Agent](../backlog/ess-log-scout-syslog-agent.md)** — Standalone HTTP microservice on syslog servers, ripgrep search, ESS client adapter, per-host routing (30-40h)
 
@@ -179,12 +179,15 @@ Current runtime state:
 
 - Trigger API, scheduler, Datadog Pup adapter, Docker packaging, and Datadog D3 tool definitions are implemented.
 - The live health-check path now uses a Datadog-only Bedrock tool loop with deterministic Pup fallback.
+- A debug-gated Phase 1.5 trace seam now records observable cycle execution, notification, and completion events when enabled.
 - Session results are visible through the API, including `latest_result` on `GET /api/v1/deploy/{job_id}`.
-- Sentry integration, Log Scout integration, escalation policy, and Teams notification remain outside the current runtime path.
+- Teams delivery is now config-gated on the same runtime path for repeated-warning, critical, and end-of-window notifications.
+- Sentry integration, Log Scout integration, advanced escalation, and notification retry policy remain outside the current runtime path.
+- Live Datadog smoke validation now passes on the real Bedrock tool path using botocore's native bearer-token support. Re-run 15-minute and 30-minute windows both completed `HEALTHY` on the live Bedrock path; the 60-minute payload remains an optional operator-confidence run rather than a release blocker.
 
 This means ESS can already monitor a deployment window against Datadog alone, but the full multi-tool orchestrator from later phases is not complete yet.
 
-The next milestone is Phase 1.5: turning that Datadog-only monitor into a shippable first deliverable that is either:
+The current milestone is Phase 1.5: turning that Datadog-only monitor into a shippable first deliverable that is either:
 
 - **inspectable** through the session API and structured logs, with an optional debug-gated local trace when deeper inspection is needed
 - **unattended and still debuggable** when Teams delivery is enabled via config
@@ -344,15 +347,15 @@ is the natural upgrade path because it models agent workflows as explicit state
 machines.
 
 **Recommended LLM**:
-- **Triage cycles**: Claude Haiku 4.5 via AWS Bedrock — fast, cheap, sufficient
-  for standard health-check tool calls and yes/no anomaly detection.
-- **Investigation cycles**: Claude Sonnet 4.6 (`global.anthropic.claude-sonnet-4-6`)
-  via AWS Bedrock — deeper reasoning for root-cause analysis and correlation.
-- **Fallback**: OpenAI GPT-4.1-mini if Bedrock is unavailable.
+- **Current runtime triage and investigation cycles**: Claude Sonnet 4.6 (`global.anthropic.claude-sonnet-4-6`)
+    via AWS Bedrock — validated for both the initial Datadog tool pass and deeper investigation turns.
+- **Future optimisation option**: re-evaluate a cheaper triage model after the first deliverable is fully validated.
+- **Fallback**: deterministic Pup triage if Bedrock is unavailable or returns no tool calls.
 
-**Bedrock auth**: Bearer token format (`ABSK<Base64(key_id:secret)>`) decoded
-into standard AWS credentials at startup, consistent with the Vellum/Wellspring
-stack. See Decision 8 (Bedrock Auth) below.
+**Bedrock auth**: Keep the bearer token in `AWS_BEARER_TOKEN_BEDROCK` and let
+botocore's native Bedrock bearer-token support consume it. Do not decode it
+into raw AWS access-key/secret pairs in application code. See Decision 8
+(Bedrock Auth) below.
 
 ---
 
@@ -404,8 +407,8 @@ supports rich formatting for health reports, requires only a webhook URL.
 
 ### Decision 8: Bedrock Authentication — Bearer Token
 
-ESS uses the same bearer-token auth pattern established in the Vellum and
-Wellspring stacks:
+ESS keeps Bedrock auth in `AWS_BEARER_TOKEN_BEDROCK` and routes it through
+`ESSConfig` so botocore can use its native bearer-token support:
 
 ```python
 # config/.env
@@ -414,12 +417,12 @@ AWS_BEDROCK_REGION=us-west-2
 AWS_EC2_METADATA_DISABLED=true
 ```
 
-At startup, the config loader:
-1. Strips the `ABSK` prefix from `AWS_BEARER_TOKEN_BEDROCK`
-2. Base64-decodes the payload to `key_id:secret`
-3. Splits on `:` into `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
-4. Syncs both to `os.environ` for boto3 consumption
-5. Disables IMDS (`AWS_EC2_METADATA_DISABLED=true`) to prevent local dev timeouts
+At startup, `ESSConfig` syncs config-owned runtime overrides for botocore and
+subprocesses:
+1. Preserves `AWS_BEARER_TOKEN_BEDROCK` for native Bedrock auth
+2. Syncs `AWS_DEFAULT_REGION`
+3. Syncs `AWS_EC2_METADATA_DISABLED=true` to avoid local IMDS timeouts
+4. Exposes typed helpers for subprocess environments instead of direct app-level env access
 
 The boto3 `bedrock-runtime` client then uses standard AWS credential chain:
 ```python
@@ -427,7 +430,7 @@ import boto3
 client = boto3.client(
     service_name="bedrock-runtime",
     region_name=config.aws_bedrock_region,
-    # Credentials picked up from os.environ automatically
+    # Native bearer-token auth is provided through config-owned runtime env wiring
 )
 response = client.converse(
     modelId="global.anthropic.claude-sonnet-4-6",
@@ -436,8 +439,8 @@ response = client.converse(
 )
 ```
 
-This avoids storing raw AWS key/secret pairs in config files — the ABSK token is
-the single credential to manage.
+This avoids storing raw AWS key/secret pairs in config files and keeps all
+runtime environment mutation inside `src/config.py`.
 
 ---
 
@@ -463,7 +466,7 @@ Recommended configuration shape:
 - `ESS_TEAMS_ENABLED=true` → ESS posts Teams notifications from the same runtime path
 - `ESS_DEBUG_TRACE_ENABLED=false` → default; ESS does not write a local trace file
 - `ESS_DEBUG_TRACE_ENABLED=true` → enable a local debug trace sink for the running process
-- `ESS_AGENT_TRACE_PATH=agent_trace.jsonl` → optional override; only honoured when `ESS_DEBUG_TRACE_ENABLED=true`
+- `ESS_AGENT_TRACE_PATH=_local_observability/agent_trace.jsonl` → optional override; only honoured when `ESS_DEBUG_TRACE_ENABLED=true`
 
 The trace should capture the full **observable agent trace** for each cycle:
 
@@ -612,8 +615,8 @@ class ESSConfig(BaseSettings):
 
     # LLM — Bedrock with bearer token auth
     llm_provider: str = "bedrock"         # bedrock | anthropic | openai
-    triage_model: str = "global.anthropic.claude-haiku-4-5"      # fast, cheap
-    investigation_model: str = "global.anthropic.claude-sonnet-4-6"  # deep reasoning
+    triage_model: str = "global.anthropic.claude-sonnet-4-6"
+    investigation_model: str = "global.anthropic.claude-sonnet-4-6"
     aws_bedrock_region: str = "us-west-2"
     aws_bearer_token_bedrock: str = ""    # ABSK<Base64(key_id:secret)>
     aws_ec2_metadata_disabled: bool = True
@@ -640,23 +643,19 @@ class ESSConfig(BaseSettings):
     default_teams_webhook_url: Optional[str] = None
 
     def model_post_init(self, __context) -> None:
-        """Decode ABSK bearer token into AWS credentials for boto3."""
-        import os, base64
-        token = self.aws_bearer_token_bedrock
-        if token:
-            payload = token[4:] if token.startswith("ABSK") else token
-            try:
-                decoded = base64.b64decode(payload).decode("utf-8")
-                if ":" in decoded:
-                    key_id, secret = decoded.split(":", 1)
-                    os.environ["AWS_ACCESS_KEY_ID"] = key_id
-                    os.environ["AWS_SECRET_ACCESS_KEY"] = secret.strip()
-            except Exception:
-                pass  # Will fail at Bedrock call time
+        """Sync config-owned runtime overrides for botocore and subprocesses."""
+        for key, value in self.runtime_environment().items():
+            os.environ[key] = value
+
+    def runtime_environment(self) -> dict[str, str]:
+        env: dict[str, str] = {}
+        if self.aws_bearer_token_bedrock:
+            env["AWS_BEARER_TOKEN_BEDROCK"] = self.aws_bearer_token_bedrock
         if self.aws_bedrock_region:
-            os.environ["AWS_DEFAULT_REGION"] = self.aws_bedrock_region
+            env["AWS_DEFAULT_REGION"] = self.aws_bedrock_region
         if self.aws_ec2_metadata_disabled:
-            os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+            env["AWS_EC2_METADATA_DISABLED"] = "true"
+        return env
 ```
 
 #### E1.6 — Tests
@@ -683,7 +682,7 @@ flowchart LR
     API --> SCHED[APScheduler Monitoring Window]
     SCHED --> AGENT[Datadog Health-Check Agent]
     AGENT --> PUP[Datadog Pup CLI]
-    AGENT -->|if ESS_DEBUG_TRACE_ENABLED=true| TRACE[agent_trace.jsonl debug sink]
+    AGENT -->|if ESS_DEBUG_TRACE_ENABLED=true| TRACE[_local_observability trace sink]
     AGENT -->|if ESS_TEAMS_ENABLED=true| TEAMS[MS Teams Webhook]
     API --> STATUS[Session Status API]
 ```
@@ -715,8 +714,8 @@ Verification:
 
 #### E15.2 — Debug-gated local trace bridge
 
-Add a debug-only local trace sink at the project root, defaulting to
-`agent_trace.jsonl`, as a bridge toward later OpenTelemetry-based observability.
+Add a debug-only local trace sink under `_local_observability/`, defaulting to
+`_local_observability/agent_trace.jsonl`, as a bridge toward later OpenTelemetry-based observability.
 
 Required behavior:
 
@@ -746,7 +745,7 @@ Design constraint:
 Verification:
 
 - when debug tracing is disabled, no local trace file is written
-- when debug tracing is enabled, one monitoring session produces a readable chronological event stream at the project root
+- when debug tracing is enabled, one monitoring session produces a readable chronological event stream under `_local_observability/`
 - operators can reconstruct what the agent did without polling the API continuously when debug tracing is enabled
 - the instrumentation seam is reusable by Phase 5 observability work without changing agent orchestration logic
 
@@ -840,9 +839,10 @@ class PupTool:
             "DD_SITE": self.config.dd_site,
             "FORCE_AGENT_MODE": "1",
         }
+        runtime_env = self.config.pup_subprocess_environment()
         proc = await asyncio.create_subprocess_exec(
             "pup", *args, "--output", "json",
-            stdout=PIPE, stderr=PIPE, env={**os.environ, **env}
+            stdout=PIPE, stderr=PIPE, env=runtime_env
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
@@ -985,8 +985,8 @@ class HealthCheckAgent:
         self.conversation: list[Message] = []
         self.max_iterations = 15       # safety bound
         self.max_tokens_budget = 50000 # context limit
-        # Model selection: Haiku for triage, Sonnet for investigation
-        self.triage_model = "global.anthropic.claude-haiku-4-5"
+        # Current runtime model selection: Sonnet for triage and investigation
+        self.triage_model = "global.anthropic.claude-sonnet-4-6"
         self.investigation_model = "global.anthropic.claude-sonnet-4-6"
         self.current_model = self.triage_model
 
@@ -1166,7 +1166,7 @@ Cards include:
 
 **Goal**: ESS is containerised, observable, and ready for production.
 
-Phase 1.5 pulls forward the root-level structured agent trace and the narrowed
+Phase 1.5 pulls forward the `_local_observability`-backed structured agent trace and the narrowed
 Datadog-only end-to-end shipping path. Phase 5 still covers broader production
 hardening, self-observability metrics, deployment packaging, and final audits.
 
@@ -1306,10 +1306,11 @@ notify_ess:
    locally on the syslog box, only results traverse the network. A separate plan
    is needed for the log scout service.
 
-5. **LLM cost budgeting**: Cost is not a blocking concern. Haiku 4.5 for triage
-   cycles (fast, cheap), Sonnet 4.6 (`global.anthropic.claude-sonnet-4-6`) for
-   investigation cycles (deep reasoning). All via AWS Bedrock with bearer token
-   auth (ABSK format, consistent with Vellum/Wellspring stack).
+5. **LLM cost budgeting**: Cost is not a blocking concern for the first
+    deliverable. The current runtime uses Sonnet 4.6
+    (`global.anthropic.claude-sonnet-4-6`) for both Datadog triage and deeper
+    investigation turns. All Bedrock calls use bearer-token auth via
+    `AWS_BEARER_TOKEN_BEDROCK`.
 
 ---
 

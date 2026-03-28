@@ -13,6 +13,9 @@ build/
 .venv/
 uv.lock
 
+# local development and test artefacts
+_local_observability/
+
 # Environment files — NEVER commit real credentials
 config/.env
 .env

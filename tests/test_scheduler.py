@@ -155,6 +155,14 @@ class TestAggregateSeverity:
         session.results = []
         assert ESSScheduler._aggregate_severity(session) == HealthSeverity.UNKNOWN.value
 
+    def test_unknown_escalates_to_worst(self) -> None:
+        session = MagicMock(spec=MonitoringSession)
+        r1, r2 = MagicMock(), MagicMock()
+        r1.overall_severity = HealthSeverity.WARNING
+        r2.overall_severity = HealthSeverity.UNKNOWN
+        session.results = [r1, r2]
+        assert ESSScheduler._aggregate_severity(session) == HealthSeverity.UNKNOWN.value
+
     def test_all_healthy(self) -> None:
         session = MagicMock(spec=MonitoringSession)
         r1, r2 = MagicMock(), MagicMock()
@@ -184,22 +192,25 @@ class TestRunCheckDirectly:
         try:
             health_fn = AsyncMock(side_effect=_make_health_result)
             complete_fn = AsyncMock()
+            result_fn = AsyncMock()
             deploy = _make_deploy(window=10, interval=5)
             session = await sched.schedule_monitoring(
                 job_id="ess-runchk",
                 deploy=deploy,
                 health_check_fn=health_fn,
                 on_complete_fn=complete_fn,
+                on_result_fn=result_fn,
             )
             from datetime import timedelta
 
             end_time = session.started_at + timedelta(minutes=10)
 
             assert session.checks_completed == 0
-            await sched._run_check("ess-runchk", health_fn, complete_fn, end_time)
+            await sched._run_check("ess-runchk", health_fn, complete_fn, end_time, result_fn)
             assert session.checks_completed == 1
             assert len(session.results) == 1
             health_fn.assert_awaited_once()
+            result_fn.assert_awaited_once()
         finally:
             await sched.stop()
 

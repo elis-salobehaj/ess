@@ -14,16 +14,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, TextIO
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from src.agent.health_check_agent import DatadogHealthCheckAgent
+from src.agent.trace import AgentTraceRecorder
 from src.config import ESSConfig
 from src.llm_client import make_triage_client
 from src.models import (
@@ -37,6 +40,14 @@ from src.models import (
     ServiceTarget,
     ToolResult,
 )
+from src.notifications import (
+    NotificationDecision,
+    TeamsPublisher,
+    build_summary_notification,
+    build_teams_card,
+    evaluate_cycle_notification,
+    resolve_webhook_url,
+)
 from src.scheduler import ESSScheduler, MonitoringSession
 from src.tools.normalise import pup_to_tool_result
 from src.tools.pup_tool import PupTool
@@ -46,12 +57,32 @@ from src.tools.pup_tool import PupTool
 # different level call configure_logging(level) after settings are loaded.
 # ---------------------------------------------------------------------------
 
+_LOCAL_OBSERVABILITY_DIR = Path("_local_observability")
+_DEBUG_LOG_PATH = _LOCAL_OBSERVABILITY_DIR / "ess-debug-logs.log"
+_DEBUG_LOG_HANDLE: TextIO | None = None
 
-def configure_logging(level: str = "INFO") -> None:
+
+def _configure_log_output(debug_mode: bool) -> TextIO:
+    global _DEBUG_LOG_HANDLE
+
+    if _DEBUG_LOG_HANDLE is not None:
+        _DEBUG_LOG_HANDLE.close()
+        _DEBUG_LOG_HANDLE = None
+
+    if debug_mode:
+        _LOCAL_OBSERVABILITY_DIR.mkdir(parents=True, exist_ok=True)
+        _DEBUG_LOG_HANDLE = _DEBUG_LOG_PATH.open("a", encoding="utf-8")
+        return _DEBUG_LOG_HANDLE
+
+    return sys.stdout
+
+
+def configure_logging(level: str = "INFO", *, debug_mode: bool = False) -> None:
     """Reconfigure structlog with the given log level string (e.g. 'DEBUG')."""
+    output = _configure_log_output(debug_mode)
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level, logging.INFO)),
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.WriteLoggerFactory(file=output),
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.add_log_level,
@@ -73,15 +104,21 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     cfg = config or ESSConfig()
     scheduler = ESSScheduler(max_sessions=cfg.max_concurrent_sessions)
     pup_tool = PupTool(config=cfg)
+    trace_recorder = AgentTraceRecorder(
+        enabled=cfg.debug_trace_enabled,
+        path=cfg.agent_trace_path,
+    )
+    teams_publisher = TeamsPublisher(timeout_seconds=cfg.teams_timeout_seconds)
     triage_client = make_triage_client(cfg)
     datadog_agent = DatadogHealthCheckAgent(
         bedrock_client=triage_client,
         pup_tool=pup_tool,
+        trace_recorder=trace_recorder,
     )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
-        configure_logging(cfg.log_level)
+        configure_logging(cfg.log_level, debug_mode=cfg.debug_trace_enabled)
         await scheduler.start()
         logger.info("ess_started", host=cfg.host, port=cfg.port)
         yield
@@ -99,6 +136,8 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     app.state.config = cfg
     app.state.scheduler = scheduler
     app.state.datadog_agent = datadog_agent
+    app.state.trace_recorder = trace_recorder
+    app.state.teams_publisher = teams_publisher
 
     # -----------------------------------------------------------------------
     # Exception handlers
@@ -169,7 +208,16 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
                 job_id=job_id,
                 deploy=payload,
                 health_check_fn=datadog_agent.run_health_check,
-                on_complete_fn=_stub_on_complete,
+                on_complete_fn=_build_completion_callback(
+                    cfg,
+                    trace_recorder,
+                    teams_publisher,
+                ),
+                on_result_fn=_build_result_callback(
+                    cfg,
+                    trace_recorder,
+                    teams_publisher,
+                ),
             )
         except ValueError as exc:
             raise HTTPException(
@@ -393,8 +441,183 @@ async def _stub_health_check(session: MonitoringSession) -> HealthCheckResult:
     )
 
 
+def _build_completion_callback(
+    cfg: ESSConfig,
+    trace_recorder: AgentTraceRecorder,
+    teams_publisher: TeamsPublisher,
+):
+    async def _on_complete(session: MonitoringSession) -> None:
+        overall_severity = _aggregate_session_severity(session)
+
+        await trace_recorder.emit(
+            "session.completed",
+            trace_id=session.job_id,
+            cycle_number=session.checks_completed or None,
+            attributes={
+                "checks_completed": session.checks_completed,
+                "checks_planned": session.checks_planned,
+                "overall_severity": overall_severity.value,
+                "services": [service.name for service in session.deploy.services],
+                "latest_result": (
+                    session.results[-1].model_dump(mode="json") if session.results else None
+                ),
+            },
+        )
+
+        await _deliver_notification(
+            cfg,
+            trace_recorder,
+            teams_publisher,
+            session,
+            build_summary_notification(session),
+        )
+
+        logger.info(
+            "monitoring_session_completed",
+            job_id=session.job_id,
+            checks_completed=session.checks_completed,
+            overall_severity=overall_severity.value,
+            teams_enabled=cfg.teams_enabled,
+        )
+
+    return _on_complete
+
+
+def _build_result_callback(
+    cfg: ESSConfig,
+    trace_recorder: AgentTraceRecorder,
+    teams_publisher: TeamsPublisher,
+):
+    async def _on_result(session: MonitoringSession, result: HealthCheckResult) -> None:
+        decision, reason = evaluate_cycle_notification(session, result)
+        if decision is None:
+            await trace_recorder.emit(
+                "notification.skipped",
+                trace_id=session.job_id,
+                cycle_number=result.cycle_number,
+                attributes={
+                    "kind": "cycle",
+                    "reason": reason,
+                    "teams_enabled": cfg.teams_enabled,
+                    "overall_severity": result.overall_severity.value,
+                },
+            )
+            return
+
+        await _deliver_notification(
+            cfg,
+            trace_recorder,
+            teams_publisher,
+            session,
+            decision,
+        )
+
+    return _on_result
+
+
+async def _deliver_notification(
+    cfg: ESSConfig,
+    trace_recorder: AgentTraceRecorder,
+    teams_publisher: TeamsPublisher,
+    session: MonitoringSession,
+    decision: NotificationDecision,
+) -> None:
+    webhook_url, webhook_source = resolve_webhook_url(session, cfg.default_teams_webhook_url)
+
+    if not cfg.teams_enabled:
+        await trace_recorder.emit(
+            "notification.skipped",
+            trace_id=session.job_id,
+            cycle_number=decision.cycle_number,
+            attributes={
+                "kind": decision.kind.value,
+                "reason": "teams_disabled",
+                "teams_enabled": False,
+            },
+        )
+        return
+
+    if webhook_url is None:
+        await trace_recorder.emit(
+            "notification.skipped",
+            trace_id=session.job_id,
+            cycle_number=decision.cycle_number,
+            attributes={
+                "kind": decision.kind.value,
+                "reason": "missing_webhook_url",
+                "teams_enabled": True,
+            },
+        )
+        logger.warning(
+            "teams_notification_skipped_missing_webhook",
+            job_id=session.job_id,
+            kind=decision.kind.value,
+        )
+        return
+
+    await trace_recorder.emit(
+        "notification.attempted",
+        trace_id=session.job_id,
+        cycle_number=decision.cycle_number,
+        attributes={
+            "kind": decision.kind.value,
+            "reason": decision.reason,
+            "overall_severity": decision.overall_severity.value,
+            "webhook_source": webhook_source,
+        },
+    )
+
+    delivery = await teams_publisher.post_card(webhook_url, build_teams_card(session, decision))
+    if delivery.ok:
+        await trace_recorder.emit(
+            "notification.delivered",
+            trace_id=session.job_id,
+            cycle_number=decision.cycle_number,
+            attributes={
+                "kind": decision.kind.value,
+                "status_code": delivery.status_code,
+                "response_text": delivery.response_text,
+                "webhook_source": webhook_source,
+            },
+        )
+        logger.info(
+            "teams_notification_delivered",
+            job_id=session.job_id,
+            kind=decision.kind.value,
+            status_code=delivery.status_code,
+        )
+        return
+
+    await trace_recorder.emit(
+        "notification.failed",
+        trace_id=session.job_id,
+        cycle_number=decision.cycle_number,
+        attributes={
+            "kind": decision.kind.value,
+            "status_code": delivery.status_code,
+            "error": delivery.error,
+            "response_text": delivery.response_text,
+            "webhook_source": webhook_source,
+        },
+    )
+    logger.warning(
+        "teams_notification_failed",
+        job_id=session.job_id,
+        kind=decision.kind.value,
+        status_code=delivery.status_code,
+        error=delivery.error,
+    )
+
+
+def _aggregate_session_severity(session: MonitoringSession) -> HealthSeverity:
+    overall = HealthSeverity.HEALTHY if session.results else HealthSeverity.UNKNOWN
+    for result in session.results:
+        overall = _max_severity(overall, result.overall_severity)
+    return overall
+
+
 async def _stub_on_complete(session: MonitoringSession) -> None:
-    """Placeholder completion callback — Teams notification wired up in Phase 4."""
+    """Legacy placeholder kept for older tests and phased rollout reference."""
     logger.info(
         "monitoring_session_complete_stub",
         job_id=session.job_id,

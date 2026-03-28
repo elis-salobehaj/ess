@@ -10,7 +10,7 @@
 3. ESS validates the payload, returns `202 Accepted` with job ID
 4. APScheduler creates an interval job for the monitoring window
 5. Job ticks every `check_interval_minutes` until `window_minutes` expires
-6. On window expiry, job auto-removes; Teams summary posting is still future work
+6. On window expiry, the job auto-removes and emits an end-of-window summary notification when Teams mode is enabled
 
 ## Health-Check Cycle (per tick)
 
@@ -21,10 +21,13 @@ Each scheduler tick runs one health-check cycle across all services:
 For each scheduler tick:
 
 1. ESS builds a Datadog-specific Bedrock system prompt and user prompt from the deploy context
-2. Bedrock can call Datadog tools through the D3 tool layer (`DATADOG_TOOL_CONFIG`)
+2. Bedrock authenticates through botocore's native `AWS_BEARER_TOKEN_BEDROCK` support and can call Datadog tools through the D3 tool layer (`DATADOG_TOOL_CONFIG`)
 3. Tool calls are dispatched to `PupTool` and normalised into `ToolResult`
-4. The resulting findings are stored on the in-memory monitoring session
-5. If the Bedrock path fails or returns no tool calls, ESS falls back to deterministic Datadog triage for that cycle
+4. The current runtime model is Sonnet 4.6 for both triage and deeper investigation turns, so the same cycle can deepen after the initial triage tool pass
+5. When debug tracing is enabled, ESS records prompts, tool uses, tool results, fallback events, notification attempts/outcomes, and cycle completion to the local JSONL sink, writes a companion Markdown digest, and routes structlog output to `_local_observability/ess-debug-logs.log`
+6. The resulting findings are stored on the in-memory monitoring session
+7. After each successful cycle, ESS evaluates the minimal unattended policy: immediate `CRITICAL`, second consecutive `WARNING`, otherwise no Teams delivery
+8. If the Bedrock path fails or returns no tool calls, ESS falls back to deterministic Datadog triage for that cycle
 
 ### Target Triage (full multi-tool design)
 
@@ -35,7 +38,7 @@ For each service in the trigger:
 4. Query Sentry issues → new unresolved issues since deploy?
 5. Search logs via Log Scout → error patterns in raw logs?
 
-### Investigation (runs if triage finds anomalies, Sonnet 4.6)
+### Investigation (runs if triage finds anomalies)
 
 1. Get Sentry issue details (stack trace, affected users)
 2. Search logs for specific error patterns
@@ -54,15 +57,16 @@ For each service in the trigger:
 
 - `HEALTHY`: log and continue
 - `WARNING` (2+ consecutive): post warning card to Teams
-- `CRITICAL` (any): immediate alert card, switch to Sonnet investigation model
+- `CRITICAL` (any): immediate alert card and include the cycle summary in the Teams payload
 
 ## Notification Pipeline
 
-1. Current state: health checks produce structured results stored on the session object and exposed via `GET /api/v1/deploy/{job_id}`
-2. Target state: report mapped to Adaptive Card template (all-clear, issue, summary)
-3. Target state: card POSTed to Teams webhook URL
-4. Target state: retry with exponential backoff (3 attempts: 1s, 2s, 4s)
-5. Target state: on persistent failure, log error and continue monitoring
+1. Each cycle result is stored on the session object and exposed via `GET /api/v1/deploy/{job_id}`
+2. The result callback evaluates the warning/critical policy and resolves the webhook from the trigger payload or default config
+3. Delivery attempts and outcomes are emitted through the debug trace instrumentation seam when enabled
+4. Cards are POSTed to the Teams webhook with an explicit per-request timeout
+5. End-of-window summary uses the same delivery path as cycle notifications
+6. Retry with exponential backoff remains Phase 4 work
 
 ## Documentation Practices
 

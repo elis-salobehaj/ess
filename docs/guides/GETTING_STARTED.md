@@ -46,6 +46,7 @@ uv sync
 # Copy environment config
 cp config/.env.example config/.env
 # Edit config/.env with your credentials
+# Bedrock uses AWS_BEARER_TOKEN_BEDROCK directly; do not add raw AWS access key / secret pairs
 
 # Run the service
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload
@@ -56,6 +57,14 @@ uv run pytest
 # Lint and format
 uv run ruff check .
 uv run ruff format .
+```
+
+Optional debug-friendly local setup:
+
+```env
+ESS_DEBUG_TRACE_ENABLED=true
+ESS_AGENT_TRACE_PATH=_local_observability/agent_trace.jsonl
+ESS_TEAMS_ENABLED=false
 ```
 
 ## First Deploy Trigger
@@ -90,6 +99,21 @@ curl -s -X POST http://localhost:8080/api/v1/deploy \
   }'
 ```
 
+For a realistic local smoke run against the current Datadog-only runtime, use the checked-in trigger fixture instead:
+
+```bash
+curl -sS -H 'Content-Type: application/json' \
+  -X POST http://127.0.0.1:8080/api/v1/deploy \
+  --data @docs/examples/triggers/example-service-e2e.json
+```
+
+If debug tracing is enabled, inspect:
+
+```bash
+tail -f _local_observability/ess-debug-logs.log
+tail -f _local_observability/agent_trace_digest_<job_id>.md
+```
+
 ## Docker
 
 ```bash
@@ -100,4 +124,5 @@ docker compose up --build
 
 - Read [Architecture](../context/ARCHITECTURE.md) for system design
 - Read [Configuration](../context/CONFIGURATION.md) for all env vars
+- Read [Trigger End-to-End Datadog Pup Integration](TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md) for smoke and extended validation payloads
 - Check [plans/active/](../plans/active/) for current work

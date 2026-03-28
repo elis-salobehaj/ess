@@ -15,7 +15,7 @@ ESS does NOT remediate. It watches, investigates, and reports.
 - **HTTP framework**: FastAPI + uvicorn
 - **Validation and config**: pydantic v2, pydantic-settings v2
 - **Async model**: asyncio with subprocess streaming (Pup CLI) and aiohttp (HTTP clients)
-- **LLM**: AWS Bedrock converse API (Claude Haiku 4.5 triage, Sonnet 4.6 investigation) via bearer token auth
+- **LLM**: AWS Bedrock converse API (current runtime: Claude Sonnet 4.6 for triage and investigation) via bearer token auth
 - **Datadog**: Pup CLI (subprocess, 320+ commands, agent-mode JSON output)
 - **Sentry**: REST API client (self-hosted, aiohttp-based)
 - **Log search**: Remote ESS Log Scout agent (HTTP calls to syslog servers)
@@ -36,12 +36,19 @@ ESS does NOT remediate. It watches, investigates, and reports.
 3. **Keep I/O async and bounded**: subprocess calls (Pup CLI), HTTP requests
    (Sentry, Log Scout, Teams), and LLM calls must use timeouts, concurrency
    limits (semaphores), and circuit breakers.
-4. **Do not bypass config**: import settings from `src/config.py`. Never use raw
-   `os.getenv()` in application code.
+4. **Do not bypass config**: import settings from `src/config.py`. Outside
+   `src/config.py`, raw environment access is forbidden: do not use
+   `os.getenv()`, `os.environ`, `os.putenv()`, or `os.unsetenv()` in
+   application code. If an SDK or subprocess needs environment variables,
+   expose a typed helper on `ESSConfig` and consume that helper instead.
 5. **Observer only**: ESS must never take remediation actions. No rollbacks, no
    restarts, no infrastructure changes. Observation and reporting only.
-6. **Bedrock auth via ABSK token**: decode the `AWS_BEARER_TOKEN_BEDROCK` env var
-   (ABSK format) at startup. Never store raw AWS key/secret pairs in config files.
+6. **Bedrock auth via ABSK bearer token**: keep Bedrock auth in
+   `AWS_BEARER_TOKEN_BEDROCK` and route it through `src/config.py` only.
+   `src/config.py` may sync the token into the runtime environment for
+   botocore's native bearer-token support, but application code must never
+   decode it into raw AWS access-key/secret pairs or store those credentials in
+   config files.
 7. **Update plan tracking** when work is plan-driven: adjust frontmatter,
    `date_updated`, [docs/README.md](docs/README.md), and the relevant plan file.
 8. **Structured logging only**: JSON-formatted structured logs via structlog or

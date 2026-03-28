@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from asyncio.subprocess import PIPE
 from dataclasses import dataclass
@@ -125,13 +124,7 @@ class PupTool:
             )
 
         async with self._semaphore:
-            env = {
-                **os.environ,
-                "DD_API_KEY": self.config.dd_api_key,
-                "DD_APP_KEY": self.config.dd_app_key,
-                "DD_SITE": self.config.dd_site,
-                "FORCE_AGENT_MODE": "1",
-            }
+            env = self.config.pup_subprocess_environment()
 
             t_start = time.monotonic()
 

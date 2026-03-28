@@ -19,6 +19,7 @@ from src.agent.datadog_tools import (
     build_datadog_tool_prompt_fragment,
     execute_datadog_tool_uses,
 )
+from src.agent.trace import AgentTraceRecorder
 from src.llm_client import BedrockClient, build_assistant_message, build_user_message
 from src.models import (
     HealthCheckResult,
@@ -45,14 +46,33 @@ class DatadogHealthCheckAgent:
         pup_tool: PupTool,
         *,
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
+        trace_recorder: AgentTraceRecorder | None = None,
     ) -> None:
         self._bedrock_client = bedrock_client
         self._pup_tool = pup_tool
         self._max_iterations = max_iterations
+        self._trace_recorder = trace_recorder
 
     async def run_health_check(self, session: MonitoringSession) -> HealthCheckResult:
+        cycle_event = await self._trace(
+            "cycle.started",
+            session,
+            attributes={
+                "services": [service.name for service in session.deploy.services],
+                "datadog_services": [
+                    service.datadog_service_name for service in session.deploy.services
+                ],
+                "environment": session.deploy.deployment.environment.value,
+                "regions": session.deploy.deployment.regions,
+                "commit_sha": session.deploy.deployment.commit_sha,
+            },
+        )
+
         try:
-            return await self._run_agent_loop(session)
+            result = await self._run_agent_loop(
+                session,
+                parent_event_id=cycle_event.event_id if cycle_event else None,
+            )
         except Exception as exc:
             logger.exception(
                 "datadog_agent_loop_failed",
@@ -60,15 +80,55 @@ class DatadogHealthCheckAgent:
                 cycle=session.checks_completed + 1,
                 error=str(exc),
             )
-            return await self._run_deterministic_fallback(session, reason=str(exc))
+            await self._trace(
+                "agent.error",
+                session,
+                parent_event_id=cycle_event.event_id if cycle_event else None,
+                attributes={"error": str(exc)},
+            )
+            result = await self._run_deterministic_fallback(
+                session,
+                reason=str(exc),
+                parent_event_id=cycle_event.event_id if cycle_event else None,
+            )
 
-    async def _run_agent_loop(self, session: MonitoringSession) -> HealthCheckResult:
+        await self._trace(
+            "cycle.completed",
+            session,
+            parent_event_id=cycle_event.event_id if cycle_event else None,
+            attributes={
+                "overall_severity": result.overall_severity.value,
+                "services_checked": result.services_checked,
+                "finding_count": len(result.findings),
+                "findings": [finding.model_dump(mode="json") for finding in result.findings],
+            },
+        )
+        return result
+
+    async def _run_agent_loop(
+        self,
+        session: MonitoringSession,
+        *,
+        parent_event_id: str | None,
+    ) -> HealthCheckResult:
         system_prompt = self._build_system_prompt(session)
-        conversation = [build_user_message(self._build_user_prompt(session))]
+        user_prompt = self._build_user_prompt(session)
+        conversation = [build_user_message(user_prompt)]
         executed_calls: list[tuple[dict[str, Any], ToolResult]] = []
         final_text = ""
 
         for iteration in range(1, self._max_iterations + 1):
+            request_event = await self._trace(
+                "bedrock.request",
+                session,
+                parent_event_id=parent_event_id,
+                attributes={
+                    "iteration": iteration,
+                    "model_id": self._model_id_for_trace(),
+                    "system_prompt": system_prompt,
+                    "conversation": conversation,
+                },
+            )
             response = await self._bedrock_client.converse(
                 messages=conversation,
                 system=system_prompt,
@@ -77,6 +137,19 @@ class DatadogHealthCheckAgent:
             conversation.append(build_assistant_message(response))
 
             tool_uses = BedrockClient.extract_tool_uses(response)
+            final_text = BedrockClient.extract_text(response)
+            response_event = await self._trace(
+                "bedrock.response",
+                session,
+                parent_event_id=request_event.event_id if request_event else parent_event_id,
+                attributes={
+                    "iteration": iteration,
+                    "stop_reason": response.get("stopReason"),
+                    "assistant_text": final_text,
+                    "tool_uses": tool_uses,
+                    "usage": response.get("usage", {}),
+                },
+            )
             if tool_uses:
                 tool_results, tool_messages = await execute_datadog_tool_uses(
                     self._pup_tool,
@@ -84,6 +157,39 @@ class DatadogHealthCheckAgent:
                 )
                 conversation.extend(tool_messages)
                 executed_calls.extend(zip(tool_uses, tool_results, strict=False))
+                for tool_use, tool_result in zip(tool_uses, tool_results, strict=False):
+                    tool_use_event = await self._trace(
+                        "tool.use",
+                        session,
+                        parent_event_id=(
+                            response_event.event_id if response_event else parent_event_id
+                        ),
+                        attributes={
+                            "iteration": iteration,
+                            "tool_name": tool_use.get("name"),
+                            "tool_use_id": tool_use.get("toolUseId"),
+                            "tool_input": tool_use.get("input", {}),
+                        },
+                    )
+                    await self._trace(
+                        "tool.result",
+                        session,
+                        parent_event_id=(
+                            tool_use_event.event_id
+                            if tool_use_event
+                            else response_event.event_id if response_event else parent_event_id
+                        ),
+                        attributes={
+                            "iteration": iteration,
+                            "tool": tool_result.tool,
+                            "success": tool_result.success,
+                            "summary": tool_result.summary,
+                            "error": tool_result.error,
+                            "duration_ms": tool_result.duration_ms,
+                            "data": tool_result.data,
+                            "raw": tool_result.raw,
+                        },
+                    )
                 logger.info(
                     "datadog_agent_tool_iteration",
                     job_id=session.job_id,
@@ -93,7 +199,6 @@ class DatadogHealthCheckAgent:
                 )
                 continue
 
-            final_text = BedrockClient.extract_text(response)
             break
 
         if not executed_calls:
@@ -104,7 +209,17 @@ class DatadogHealthCheckAgent:
                 cycle=session.checks_completed + 1,
                 reason=reason,
             )
-            return await self._run_deterministic_fallback(session, reason=reason)
+            await self._trace(
+                "fallback.triggered",
+                session,
+                parent_event_id=parent_event_id,
+                attributes={"reason": reason},
+            )
+            return await self._run_deterministic_fallback(
+                session,
+                reason=reason,
+                parent_event_id=parent_event_id,
+            )
 
         return self._build_result_from_executed_calls(
             session,
@@ -118,8 +233,15 @@ class DatadogHealthCheckAgent:
         session: MonitoringSession,
         *,
         reason: str,
+        parent_event_id: str | None,
     ) -> HealthCheckResult:
         environment = session.deploy.deployment.environment.value
+        fallback_event = await self._trace(
+            "fallback.started",
+            session,
+            parent_event_id=parent_event_id,
+            attributes={"reason": reason, "environment": environment},
+        )
         per_service_results = await asyncio.gather(
             *[
                 self._run_triage_for_service(service, environment)
@@ -144,6 +266,25 @@ class DatadogHealthCheckAgent:
             for index, tool_result in enumerate(tool_results, start=1):
                 finding = self._tool_result_to_finding(service_name, tool_result)
                 findings.append(finding)
+                await self._trace(
+                    "tool.result",
+                    session,
+                    parent_event_id=(
+                        fallback_event.event_id if fallback_event else parent_event_id
+                    ),
+                    attributes={
+                        "execution_path": "fallback",
+                        "service": service_name,
+                        "sequence": index,
+                        "tool": tool_result.tool,
+                        "success": tool_result.success,
+                        "summary": tool_result.summary,
+                        "error": tool_result.error,
+                        "duration_ms": tool_result.duration_ms,
+                        "data": tool_result.data,
+                        "raw": tool_result.raw,
+                    },
+                )
                 raw_tool_outputs[f"{service_name}:{tool_result.tool}:{index}"] = {
                     "success": tool_result.success,
                     "summary": tool_result.summary,
@@ -162,6 +303,35 @@ class DatadogHealthCheckAgent:
             services_checked=[service.name for service in session.deploy.services],
             raw_tool_outputs=raw_tool_outputs,
         )
+
+    async def _trace(
+        self,
+        event_type: str,
+        session: MonitoringSession,
+        *,
+        parent_event_id: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> Any:
+        if self._trace_recorder is None:
+            return None
+        return await self._trace_recorder.emit(
+            event_type,
+            trace_id=session.job_id,
+            cycle_number=session.checks_completed + 1,
+            parent_event_id=parent_event_id,
+            attributes=attributes,
+        )
+
+    def _model_id_for_trace(self) -> str:
+        model_id = getattr(self._bedrock_client, "model_id", None)
+        if isinstance(model_id, str) and model_id:
+            return model_id
+
+        private_model_id = getattr(self._bedrock_client, "_model_id", None)
+        if isinstance(private_model_id, str) and private_model_id:
+            return private_model_id
+
+        return "unknown"
 
     async def _run_triage_for_service(
         self,

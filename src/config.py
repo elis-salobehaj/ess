@@ -1,34 +1,37 @@
 """ESS configuration — pydantic-settings backed by config/.env.
 
-ABSK bearer token decoding (Decision 8) is handled in model_post_init so
-that boto3's credential chain picks up the decoded values from os.environ
-immediately after settings are instantiated.
+Bedrock bearer-token auth is synced into ``os.environ`` in ``model_post_init``
+so botocore can use its native ``AWS_BEARER_TOKEN_BEDROCK`` support.
 """
 
 from __future__ import annotations
 
-import base64
 import os
+from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_ENV_FILE = _REPO_ROOT / "config" / ".env"
 
 
 class ESSConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="config/.env",
+        env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # -------------------------------------------------------------------------
     # LLM — AWS Bedrock with ABSK bearer token auth
     # -------------------------------------------------------------------------
     llm_provider: str = "bedrock"
-    triage_model: str = "global.anthropic.claude-haiku-4-5"
+    triage_model: str = "global.anthropic.claude-sonnet-4-6"
     investigation_model: str = "global.anthropic.claude-sonnet-4-6"
     aws_bedrock_region: str = "us-west-2"
-    # ABSK<Base64(key_id:secret)> — decoded into os.environ in model_post_init
+    # Passed through to botocore's native Bedrock bearer-token auth path.
     aws_bearer_token_bedrock: str = ""
     aws_ec2_metadata_disabled: bool = True
 
@@ -64,7 +67,24 @@ class ESSConfig(BaseSettings):
     # -------------------------------------------------------------------------
     # MS Teams
     # -------------------------------------------------------------------------
+    teams_enabled: bool = Field(default=False, validation_alias="ESS_TEAMS_ENABLED")
     default_teams_webhook_url: str | None = None
+    teams_timeout_seconds: int = Field(
+        default=10,
+        validation_alias="ESS_TEAMS_TIMEOUT_SECONDS",
+    )
+
+    # -------------------------------------------------------------------------
+    # Debug trace sink (Phase 1.5 bridge toward OpenTelemetry export)
+    # -------------------------------------------------------------------------
+    debug_trace_enabled: bool = Field(
+        default=False,
+        validation_alias="ESS_DEBUG_TRACE_ENABLED",
+    )
+    agent_trace_path: Path = Field(
+        default=Path("_local_observability/agent_trace.jsonl"),
+        validation_alias="ESS_AGENT_TRACE_PATH",
+    )
 
     # -------------------------------------------------------------------------
     # Server
@@ -83,25 +103,38 @@ class ESSConfig(BaseSettings):
         return upper
 
     def model_post_init(self, __context: object) -> None:
-        """Decode the ABSK bearer token and push credentials into os.environ."""
-        token = self.aws_bearer_token_bedrock
-        if token:
-            payload = token[4:] if token.startswith("ABSK") else token
-            try:
-                decoded = base64.b64decode(payload).decode("utf-8")
-                if ":" in decoded:
-                    key_id, secret = decoded.split(":", 1)
-                    os.environ["AWS_ACCESS_KEY_ID"] = key_id
-                    os.environ["AWS_SECRET_ACCESS_KEY"] = secret.strip()
-            except Exception:
-                # Credentials will fail at call time — validation happens there.
-                pass
+        """Sync config-owned runtime environment overrides into ``os.environ``."""
+        for key, value in self.runtime_environment().items():
+            os.environ[key] = value
+
+    def runtime_environment(self) -> dict[str, str]:
+        """Return environment overrides required by runtime SDK integrations."""
+        env: dict[str, str] = {}
+
+        if self.aws_bearer_token_bedrock:
+            env["AWS_BEARER_TOKEN_BEDROCK"] = self.aws_bearer_token_bedrock
 
         if self.aws_bedrock_region:
-            os.environ["AWS_DEFAULT_REGION"] = self.aws_bedrock_region
+            env["AWS_DEFAULT_REGION"] = self.aws_bedrock_region
 
         if self.aws_ec2_metadata_disabled:
-            os.environ["AWS_EC2_METADATA_DISABLED"] = "true"
+            env["AWS_EC2_METADATA_DISABLED"] = "true"
+
+        return env
+
+    def pup_subprocess_environment(self) -> dict[str, str]:
+        """Return the full environment for Pup subprocess execution."""
+        env = os.environ.copy()
+        env.update(self.runtime_environment())
+        env.update(
+            {
+                "DD_API_KEY": self.dd_api_key,
+                "DD_APP_KEY": self.dd_app_key,
+                "DD_SITE": self.dd_site,
+                "FORCE_AGENT_MODE": "1",
+            }
+        )
+        return env
 
 
 # Module-level singleton — import this throughout the application.

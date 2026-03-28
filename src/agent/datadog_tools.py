@@ -28,7 +28,7 @@ from src.tools.pup_tool import PupResult, PupTool
 class BedrockToolUse(BaseModel):
     """Validated representation of a Bedrock ``toolUse`` block."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     toolUseId: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -353,7 +353,10 @@ async def execute_datadog_tool_uses(
         *(execute_datadog_tool_use(pup_tool, tool_use) for tool_use in tool_uses)
     )
     results = [result for result, _message in executed]
-    messages = [message for _result, message in executed]
+    tool_result_blocks = [message["content"][0] for _result, message in executed]
+    messages = []
+    if tool_result_blocks:
+        messages.append({"role": "user", "content": tool_result_blocks})
     return results, messages
 
 

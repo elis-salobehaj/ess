@@ -23,9 +23,22 @@ uv run ruff check .
 
 # Format
 uv run ruff format .
+```
 
-# Type check (if mypy is added)
-uv run mypy src/
+## Local Validation Loop
+
+```bash
+# Start the service
+uv run uvicorn src.main:app --host 127.0.0.1 --port 8080 --reload
+
+# Trigger the realistic Datadog smoke session
+curl -sS -H 'Content-Type: application/json' \
+  -X POST http://127.0.0.1:8080/api/v1/deploy \
+  --data @docs/examples/triggers/example-service-e2e.json
+
+# Watch the current runtime
+tail -f _local_observability/ess-debug-logs.log
+tail -f _local_observability/agent_trace_digest_<job_id>.md
 ```
 
 ## Project Structure
@@ -44,8 +57,8 @@ ess/
 │   ├── models.py          # Deploy event schema, health check models
 │   ├── scheduler.py       # APScheduler job management
 │   ├── llm_client.py      # Bedrock converse client
-│   ├── tools/             # Tool adapters (Datadog, Sentry, Log Scout)
-│   ├── agent/             # AI orchestrator (ReAct loop)
+│   ├── agent/             # Datadog Bedrock tool loop + tracing
+│   ├── tools/             # Tool adapters (Datadog today; Sentry/Log Scout later)
 │   └── notifications/     # MS Teams publisher
 ├── tests/
 ├── docs/
@@ -74,6 +87,12 @@ ESS uses structured JSON logging. Key fields:
 - `cycle`: health-check cycle number
 - `severity`: HEALTHY, WARNING, CRITICAL
 
+When `ESS_DEBUG_TRACE_ENABLED=true`, ESS also writes:
+
+- `_local_observability/ess-debug-logs.log`
+- `_local_observability/agent_trace_<job_id>.jsonl`
+- `_local_observability/agent_trace_digest_<job_id>.md`
+
 ## Docker Development
 
 ```bash
@@ -98,8 +117,8 @@ docker compose up --build
 
 ## Plan-Driven Workflow
 
-1. Check [docs/plans/active/](docs/plans/active/) for current work
+1. Check [../plans/active/](../plans/active/) for current work
 2. Pick a task from the plan's completion checklist
 3. Implement, test, and update the plan frontmatter
 4. Run `review-plan-phase` before marking a phase complete
-5. Update [docs/README.md](docs/README.md) with progress
+5. Update [../README.md](../README.md) with progress

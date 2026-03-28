@@ -1,12 +1,11 @@
-"""ESS LLM client — AWS Bedrock converse API with ABSK bearer-token auth.
+"""ESS LLM client — AWS Bedrock converse API with native bearer-token auth.
 
-The ABSK token is decoded into ``os.environ`` by ``ESSConfig.model_post_init``
-before this module is used.  boto3 picks up the credentials automatically via
-the standard credential chain.
+``ESSConfig`` owns the runtime environment wiring required for botocore's
+native Bedrock bearer-token support.
 
 Two client instances are provided:
-- ``triage_client``      → Claude Haiku 4.5 (fast, low-cost health-check triage)
-- ``investigation_client`` → Claude Sonnet 4.6 (deeper root-cause reasoning)
+- ``triage_client``        → Claude Sonnet 4.6 for the current runtime triage loop
+- ``investigation_client`` → Claude Sonnet 4.6 for deeper reasoning turns
 
 Both clients are lazy — the underlying boto3 session is created on first use so
 that import-time failures (e.g. missing credentials in tests) are avoided.
@@ -61,6 +60,17 @@ class BedrockClient:
                 region_name=self._config.aws_bedrock_region,
                 config=_BOTO_CONFIG,
             )
+            logger.info(
+                "bedrock_client_initialized",
+                model=self._model_id,
+                region=self._config.aws_bedrock_region,
+                auth_mode=(
+                    "native_bearer"
+                    if self._config.aws_bearer_token_bedrock
+                    else "default_chain"
+                ),
+                bearer_token_present=bool(self._config.aws_bearer_token_bedrock),
+            )
         return self._client
 
     async def converse(
@@ -106,6 +116,10 @@ class BedrockClient:
             stop_reason=response.get("stopReason"),
         )
         return response
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
 
     @staticmethod
     def extract_text(response: dict[str, Any]) -> str:
