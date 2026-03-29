@@ -46,13 +46,16 @@ Add the webhook to `config/.env`:
 ESS_TEAMS_ENABLED=true
 DEFAULT_TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
 ESS_TEAMS_TIMEOUT_SECONDS=10
+ESS_TEAMS_DELIVERY_MODE=real-world
 ```
 
 Notes:
 
-- `ESS_TEAMS_ENABLED=true` turns on warning, critical, and summary delivery.
+- `ESS_TEAMS_ENABLED=true` turns on Teams delivery.
 - `DEFAULT_TEAMS_WEBHOOK_URL` is the simplest option for a fixed channel.
 - You can still override the webhook per trigger with `monitoring.teams_webhook_url`.
+- `ESS_TEAMS_DELIVERY_MODE=real-world` is the production-oriented default.
+- `ESS_TEAMS_DELIVERY_MODE=all` is intended for review/testing when you want ESS to post every card type.
 
 ## Validate The Webhook Before Running ESS
 
@@ -92,10 +95,40 @@ Expected result:
 
 With Teams enabled, ESS will post:
 
-- immediate `CRITICAL` alerts
-- repeated `WARNING` alerts on the second consecutive warning cycle
-- a final end-of-window summary
+- in `real-world` mode:
+   - immediate `CRITICAL` alerts
+   - immediate monitoring stop after the critical cycle is posted
+   - deferred repeated-`WARNING` notifications only when the monitoring window completes
+   - no end-of-window completion report card
+- in `all` mode:
+   - immediate `CRITICAL` alerts
+   - repeated `WARNING` alerts on the second consecutive warning cycle
+   - standalone investigation follow-up cards
+   - a final end-of-window summary
 
 These notifications are emitted on the same runtime path as the Datadog Bedrock tool loop, so Bedrock, Pup, notification, and trace events all appear in the same session-scoped observability trail when debug tracing is enabled.
 
-Retry and backoff policy is not part of the current runtime yet. If Teams returns an error, ESS records the failure and continues monitoring.
+Retryable Teams webhook failures now use bounded exponential backoff before ESS records the failure and continues monitoring.
+
+Important runtime constraint:
+
+- ESS still uses Teams Incoming Webhooks, not Graph or bot replies.
+- Incoming Webhooks do not provide message-thread reply semantics.
+- True thread replies require Microsoft Graph `POST /teams/{team-id}/channels/{channel-id}/messages/{message-id}/replies` plus a parent `message-id`, which Incoming Webhooks do not return.
+- Because of that transport limit, `real-world` mode currently suppresses investigation follow-up posts instead of faking a thread reply.
+- `all` mode keeps standalone follow-up cards available for copy review and test-channel validation.
+
+## Scenario Harness
+
+Use the built-in harness to post deterministic review batches through the real ESS notification path:
+
+```bash
+uv run ess-harness teams-scenarios \
+   --trigger _local_observability/triggers/pason-well-service-qa-10m.json \
+   --teams all
+```
+
+Available modes:
+
+- `--teams all` posts all ESS card types for review.
+- `--teams real-world` mimics the production-oriented Teams policy.

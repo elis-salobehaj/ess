@@ -88,5 +88,5 @@ session-scoped JSONL trace, digest, and shared debug log.
 
 - Sentry runtime integration
 - Log Scout runtime integration
-- Teams retry policy and threaded investigation updates
+- Graph or bot-based Teams thread replies beyond the Incoming Webhook transport
 - OpenTelemetry exporter destination and collector topology

@@ -148,6 +148,30 @@ class TestCancellation:
         finally:
             await sched.stop()
 
+    async def test_request_early_completion_marks_session(self) -> None:
+        sched = ESSScheduler()
+        await sched.start()
+        try:
+            await sched.schedule_monitoring(
+                job_id="ess-early01",
+                deploy=_make_deploy(),
+                health_check_fn=AsyncMock(side_effect=_make_health_result),
+                on_complete_fn=AsyncMock(),
+            )
+            requested = await sched.request_early_completion(
+                "ess-early01",
+                reason="critical_alert_detected",
+            )
+
+            session = sched.get_session("ess-early01")
+            assert requested is True
+            assert session is not None
+            assert session.stop_requested is True
+            assert session.stop_reason == "critical_alert_detected"
+            assert session.next_check_at is None
+        finally:
+            await sched.stop()
+
 
 class TestAggregateSeverity:
     def test_no_results_returns_unknown(self) -> None:
@@ -260,5 +284,40 @@ class TestRunCheckDirectly:
             # After completion the callback must have been called.
             complete_fn.assert_awaited_once()
             assert session.status == "completed"
+        finally:
+            await sched.stop()
+
+    async def test_run_check_completes_early_when_stop_requested(self) -> None:
+        sched = ESSScheduler()
+        await sched.start()
+        try:
+            health_fn = AsyncMock(side_effect=_make_health_result)
+            complete_fn = AsyncMock()
+            deploy = _make_deploy(window=10, interval=5)
+            session = await sched.schedule_monitoring(
+                job_id="ess-stopreq01",
+                deploy=deploy,
+                health_check_fn=health_fn,
+                on_complete_fn=complete_fn,
+            )
+
+            async def result_fn(
+                current_session: MonitoringSession,
+                _result: HealthCheckResult,
+            ) -> None:
+                await sched.request_early_completion(
+                    current_session.job_id,
+                    reason="critical_alert_detected",
+                )
+
+            from datetime import timedelta
+
+            end_time = session.started_at + timedelta(minutes=10)
+
+            await sched._run_check("ess-stopreq01", health_fn, complete_fn, end_time, result_fn)
+
+            complete_fn.assert_awaited_once()
+            assert session.status == "completed"
+            assert session.stop_reason == "critical_alert_detected"
         finally:
             await sched.stop()

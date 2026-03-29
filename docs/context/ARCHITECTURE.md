@@ -9,18 +9,21 @@ MS Teams.
 
 ## Current Runtime Status
 
-Today, the live runtime path is narrower than the target architecture:
+Today, the live runtime path is a staged Datadog + Sentry orchestrator that is
+still narrower than the target architecture:
 
 - Deploy triggers, scheduler-driven monitoring windows, session status APIs, and Datadog Pup integration are implemented.
-- The health-check path uses a Datadog-first Bedrock tool-calling loop with deterministic Pup fallback when the LLM path fails or produces no tool calls.
-- The Sentry REST adapter, Bedrock-facing Sentry tool layer, and Sentry response normalisation are implemented and now power release-aware follow-up for degraded Sentry-enabled services on the live agent path.
+- Each health-check cycle now runs a Datadog-first Bedrock triage loop and, for degraded services, a deeper Bedrock investigation loop.
+- The Sentry REST adapter, Bedrock-facing Sentry tool layer, and Sentry response normalisation are implemented and participate directly in investigation turns for degraded Sentry-enabled services.
+- Deterministic Datadog fallback still protects the monitoring window when the LLM path fails or returns no tool calls.
+- Deterministic release-aware Sentry follow-up remains in place as a safety rail when investigation fails or does not use Sentry tools.
 - The current runtime model is Claude Sonnet 4.6 for both triage and deeper investigation turns.
 - Bedrock auth uses botocore's native `AWS_BEARER_TOKEN_BEDROCK` path, routed through `ESSConfig`.
-- A debug-gated local trace sink records the observable agent execution path for each monitoring cycle under `_local_observability/`.
-- Teams mode is config-gated and uses the same runtime path for repeated-warning, critical, and end-of-window notifications.
-- Log Scout is not yet wired into the live monitoring loop, and Bedrock-level multi-tool Sentry reasoning remains future orchestration work.
+- A debug-gated local trace sink records cycle execution, Bedrock requests and responses, tool actions, compaction events, notification attempts, and completion events under `_local_observability/`.
+- Teams mode is config-gated and now uses richer Adaptive Cards, correlated investigation follow-up cards, and bounded webhook retries on the same runtime path.
+- Log Scout is not yet wired into the live monitoring loop, and the remaining future scope is broader hardening and deployment work rather than basic notification/reporting.
 
-This means ESS can already run repeated Datadog-backed checks for the monitoring window and add deterministic release-aware Sentry corroboration when Datadog detects a problem, but it is not yet the full multi-tool, notification-complete architecture shown in the target view below.
+This means ESS can already run repeated Datadog-backed checks for the monitoring window, deepen on degraded signals, correlate release-aware Sentry evidence inside the Bedrock investigation path, and stay observable when the model path degrades. It is still not the full three-signal architecture shown in the target view below because Log Scout remains deferred.
 
 ## Current Runtime Diagram
 
@@ -29,8 +32,8 @@ flowchart LR
     GL[GitLab Pipeline or Operator] -->|POST /api/v1/deploy| API[Trigger API<br/>FastAPI]
     API --> SCHED[Monitoring Scheduler<br/>APScheduler]
     API --> STATE[Monitoring Session State<br/>in-memory]
-    SCHED --> AGENT[Datadog-First Health-Check Agent<br/>Bedrock Converse loop]
-    AGENT --> BR[Bedrock Runtime<br/>Claude Sonnet 4.6]
+    SCHED --> AGENT[Datadog + Sentry Health-Check Agent<br/>staged Bedrock triage and investigation]
+    AGENT --> BR[Bedrock Runtime<br/>Claude Sonnet 4.6 triage + investigation]
     AGENT --> PUP[PupTool subprocess adapter]
     PUP --> DD[Datadog via Pup CLI]
     AGENT --> SENTRY[Sentry REST adapter]
@@ -69,13 +72,13 @@ flowchart LR
 - In-memory job store (v1), Redis persistence (future)
 
 ### AI Orchestrator (ReAct Loop)
-- Current runtime path: Datadog-first Bedrock tool loop plus deterministic fallback and release-aware Sentry follow-up for degraded services
-- Target path: full LLM-driven reasoning loop using AWS Bedrock converse API
+- Current runtime path: staged Datadog-first Bedrock triage followed by deeper Bedrock investigation for degraded services, with deterministic fallback and deterministic Sentry safety rails preserved
+- Target path: expand the same loop to include Log Scout and richer downstream reporting without replacing the current orchestrator seam
 - Current runtime model: Sonnet 4.6 for both triage and deeper investigation turns
-- Future cost/performance tuning may reintroduce a cheaper triage model once the first deliverable is fully validated
+- Future cost/performance tuning may reintroduce a cheaper triage model once the expanded runtime is fully validated
 - Runs health checks across all services in the deploy trigger
-- Escalates to deeper investigation when anomalies detected
-- Context-window management with summarisation compaction
+- Escalates to deeper investigation when anomalies are detected
+- Manages context-window pressure with summarisation compaction during longer tool runs
 
 ### Tool Layer
 - **Datadog (Pup CLI)**: async subprocess, monitors/logs/APM/incidents/infra
@@ -85,22 +88,23 @@ flowchart LR
 
 ### Notification (MS Teams)
 - Incoming webhook with Adaptive Cards
-- Three card types: all-clear, issue-detected, monitoring-summary
-- Retry with exponential backoff
-- Current runtime path: bounded async webhook POSTs with explicit timeout, no retry yet
-- Phase 1.5 policy: immediate `CRITICAL`, second consecutive `WARNING`, end-of-window summary
+- Rich issue, investigation-follow-up, and monitoring-summary card content on the current runtime path
+- Current transport: Teams incoming webhook with correlated follow-up cards on the same channel path
+- Retry with exponential backoff for retryable webhook failures
+- Current notification policy: immediate `CRITICAL`, second consecutive `WARNING`, investigation follow-up after a delivered alert when deeper evidence exists, end-of-window summary
 
 ## Data Flow
 
 1. GitLab pipeline completes → `POST /deploy` with services array
 2. Scheduler creates interval job for the monitoring window
-3. Each tick: the Datadog agent loop runs Bedrock tool-calling against Pup-backed Datadog tools
-4. If triage signals require more evidence, the same cycle can issue a second or third Bedrock turn for Datadog investigation tools
-5. If Datadog results are degraded for a Sentry-enabled service, the agent performs deterministic release-aware Sentry follow-up using project details, release details, new release issue groups, and top issue details
-6. If the LLM path fails or returns no tool calls, deterministic Datadog triage still runs
-7. When debug tracing is enabled, the agent writes structured JSONL events, a Markdown digest, and structured debug logs under `_local_observability/`
-8. Findings are stored in the in-memory monitoring session and exposed by the session API
-9. End of window: the job is removed and summary delivery runs through the same instrumentation seam as cycle notifications
+3. Each tick starts a Datadog-first Bedrock triage loop against Pup-backed Datadog tools
+4. If triage is healthy, the cycle ends with a Datadog-backed summary and no Sentry work
+5. If triage is degraded for a service, the agent starts a deeper investigation loop for that service and enables Sentry tools when the deploy context supports them
+6. If the investigation path fails or omits Sentry evidence for a degraded Sentry-enabled service, deterministic release-aware Sentry follow-up still runs as a safety rail
+7. If the Bedrock path fails or returns no tool calls, deterministic Datadog triage still runs for the cycle
+8. When debug tracing is enabled, the agent writes structured JSONL events, a Markdown digest, and structured debug logs under `_local_observability/`, including conversation-compaction events when token pressure forces summarisation
+9. Findings are stored in the in-memory monitoring session and exposed by the session API
+10. End of window: the job is removed and summary delivery runs through the same instrumentation seam as cycle notifications
 
 ## Key Design Decisions
 

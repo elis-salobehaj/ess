@@ -16,8 +16,11 @@ related_files:
     - src/tools/sentry_tool.py
     - src/tools/normalise.py
     - src/notifications/__init__.py
+    - src/notifications/teams.py
     - docs/examples/triggers/example-service-e2e.json
     - tests/test_health_check_agent.py
+    - tests/test_main.py
+    - tests/test_notifications.py
     - tests/test_sentry_tool.py
     - tests/test_sentry_tools.py
     - docs/context/ARCHITECTURE.md
@@ -25,7 +28,9 @@ related_files:
     - docs/context/WORKFLOWS.md
     - docs/designs/technology-decisions.md
     - docs/plans/backlog/ess-sentry-integration.md
+    - docs/guides/DATADOG_SENTRY_ORCHESTRATION.md
     - docs/guides/SENTRY_REST_INTEGRATION.md
+    - docs/guides/TEAMS_CHANNEL_INTEGRATION.md
     - config/.env.example
 tags:
     - agentic-ai
@@ -61,20 +66,20 @@ completion:
     - [x] E2.6 Add release-aware deploy schema (`release_version`, required `sentry_project_id`) for Sentry-enabled services
     - [x] E2.7 Implement release-details, project-details, new-release-issue Sentry queries, and default-tool cleanup
     - "# Phase 3 — Agentic AI Orchestration"
-    - [ ] E3.1 Generalise the shipped Datadog agent loop into a multi-tool orchestrator
-    - [ ] E3.2 Define Sentry-aware system prompt and tool descriptions
-    - [ ] E3.3 Implement Datadog + Sentry health-check workflow (triage → investigate → report)
-    - [ ] E3.4 Build escalation logic (severity thresholds, retry/deepen cycle)
-    - [ ] E3.5 Implement context-window management and summarisation for longer multi-tool runs
-    - [ ] E3.6 Unit and integration tests for the orchestrator
-    - [ ] E3.7 Documentation update — orchestration design
+    - [x] E3.1 Generalise the shipped Datadog agent loop into a multi-tool orchestrator
+    - [x] E3.2 Define Sentry-aware system prompt and tool descriptions
+    - [x] E3.3 Implement Datadog + Sentry health-check workflow (triage → investigate → report)
+    - [x] E3.4 Build escalation logic (severity thresholds, retry/deepen cycle)
+    - [x] E3.5 Implement context-window management and summarisation for longer multi-tool runs
+    - [x] E3.6 Unit and integration tests for the orchestrator
+    - [x] E3.7 Documentation update — orchestration design
     - "# Phase 4 — Notification & Reporting"
-    - [ ] E4.1 Implement MS Teams webhook publisher
-    - [ ] E4.2 Design adaptive card templates for health reports
-    - [ ] E4.3 Implement investigation summary publisher
-    - [ ] E4.4 Add webhook retry and failure handling
-    - [ ] E4.5 Unit tests for notification layer
-    - [ ] E4.6 Documentation update — notification config guide
+    - [x] E4.1 Implement MS Teams webhook publisher
+    - [x] E4.2 Design adaptive card templates for health reports
+    - [x] E4.3 Implement investigation summary publisher
+    - [x] E4.4 Add webhook retry and failure handling
+    - [x] E4.5 Unit tests for notification layer
+    - [x] E4.6 Documentation update — notification config guide
     - "# Phase 5 — Deployment, Observability & Hardening"
     - [ ] E5.1 Containerise (Dockerfile, docker-compose)
     - [ ] E5.2 GitLab CI pipeline template for trigger integration
@@ -133,7 +138,7 @@ sequenceDiagram
     participant LOGS as Log Scout HTTP
     participant TEAMS as MS Teams Webhook
 
-    GL->>ESS: POST /deploy (service, env, dd_service, sentry_project, ...)
+    GL->>ESS: POST /deploy (services[], env, release_version, sentry ids, ...)
     ESS->>SCHED: Schedule health-check job (repeat every N min)
 
     loop Every 5-10 min for monitoring window
@@ -207,19 +212,21 @@ to the engineering team.
 Current runtime state:
 
 - Trigger API, scheduler, Datadog Pup adapter, Docker packaging, and Datadog D3 tool definitions are implemented.
-- The live health-check path now uses a Datadog-first Bedrock tool loop with deterministic Pup fallback.
-- The Sentry REST adapter now includes the release-aware project-details, release-details, and new-release-issue query surface, and degraded Sentry-enabled services now trigger deterministic Sentry follow-up on the live monitoring loop.
-- A debug-gated Phase 1.5 trace seam now records observable cycle execution, notification, and completion events when enabled.
+- The live health-check path now runs a staged Datadog-first Bedrock triage loop and a deeper investigation loop for degraded services, with deterministic Datadog fallback preserved.
+- The Sentry REST adapter now includes the release-aware project-details, release-details, and new-release-issue query surface, and degraded Sentry-enabled services can use those tools directly during investigation while retaining deterministic Sentry follow-up as a safety rail.
+- A debug-gated Phase 1.5 trace seam now records observable cycle execution, Bedrock requests and responses, tool activity, compaction events, notification events, and completion events when enabled.
 - Session results are visible through the API, including `latest_result` on `GET /api/v1/deploy/{job_id}`.
-- Teams delivery is now config-gated on the same runtime path for repeated-warning, critical, and end-of-window notifications.
-- Full Bedrock-level Datadog + Sentry orchestration, Log Scout integration, advanced escalation, and notification retry policy remain outside the current runtime path.
+- Teams delivery is now config-gated on the same runtime path for repeated-warning, critical, correlated investigation follow-up, and end-of-window notifications.
+- Teams webhook delivery now uses richer Adaptive Cards and bounded retries for retryable failures.
+- Log Scout integration and later deployment/hardening work remain outside the current runtime path.
 - Live Datadog smoke validation now passes on the real Bedrock tool path using botocore's native bearer-token support. Re-run 15-minute and 30-minute windows both completed `HEALTHY` on the live Bedrock path; the 60-minute payload remains an optional operator-confidence run rather than a release blocker.
+- Phase 3 orchestration changes are now covered by targeted unit tests, the full `uv run pytest` suite, and `uv run ruff check .`.
 
-This means ESS can already monitor a deployment window with Datadog-first triage and release-aware Sentry corroboration, but the full multi-tool orchestrator from later phases is not complete yet.
+This means ESS can already monitor a deployment window with Datadog-first triage, Bedrock-guided degraded-service investigation, release-aware Sentry correlation, context compaction, and richer Teams reporting while preserving the shipped unattended and inspectable guarantees.
 
-The next milestone is Phase 3: generalising the shipped Datadog-first runtime
-into a fuller Datadog + Sentry orchestrator while preserving the current
-inspectable and unattended delivery bar. The completed first deliverable is:
+The next milestone is Phase 5: extending the current runtime into broader
+deployment, observability, and hardening work while preserving the current
+inspectable and unattended delivery bar. The completed first deliverable remains:
 
 - **inspectable** through the session API and structured logs, with an optional debug-gated local trace when deeper inspection is needed
 - **unattended and still debuggable** when Teams delivery is enabled via config
@@ -364,9 +371,10 @@ ESS's orchestration pattern is straightforward:
 4. Summarise and publish
 
 This is a classic ReAct loop that does not require a heavyweight framework. A
-custom implementation using direct LLM API calls (Claude via AWS Bedrock or
-Anthropic API, with OpenAI as fallback) keeps the dependency footprint minimal
-and the behaviour fully transparent.
+custom implementation using direct AWS Bedrock converse calls keeps the
+dependency footprint minimal and the behaviour fully transparent. Re-evaluating
+additional provider abstractions only makes sense after the Bedrock-first
+runtime is stable and the orchestration shape is proven.
 
 The orchestrator must preserve ESS's existing **multi-service trigger** model.
 One deploy event can contain multiple service targets; triage must still run
@@ -795,7 +803,7 @@ Required behavior:
 - `ESS_DEBUG_TRACE_ENABLED` only controls the local debug sink and does not change notification policy
 - completion callback in `src/main.py` becomes real instead of stubbed
 - webhook URL comes from trigger payload or default config
-- Teams delivery uses bounded async HTTP calls with explicit timeouts; richer retry policy remains Phase 4 work
+- Teams delivery uses bounded async HTTP calls with explicit timeouts; Phase 4 extends the same path with bounded retries
 
 Verification:
 
@@ -1108,6 +1116,17 @@ class HealthCheckAgent:
         return self._timeout_report()
 ```
 
+Implementation requirements:
+
+- Preserve the current deterministic Datadog fallback when Bedrock fails or
+    returns no tool calls.
+- Treat Sentry as additive evidence; a Sentry timeout, open circuit, or tool
+    error must degrade the cycle to Datadog-only reporting rather than fail the
+    monitoring session.
+- Keep cycle reporting, notification decisions, and debug trace events on the
+    Phase 1.5 instrumentation seam so the expanded orchestrator does not lose the
+    current inspectable runtime guarantees.
+
 #### E3.2 — System prompt and tool descriptions
 
 The next prompt revision instructs the agent:
@@ -1122,7 +1141,7 @@ The next prompt revision instructs the agent:
 - You must NOT take any remediation actions — observation and reporting only
 - Be concise — summarise tool outputs instead of repeating them
 
-Tool descriptions follow OpenAI/Anthropic function-calling format with clear
+Tool descriptions follow the Bedrock converse tool-calling format with clear
 parameter schemas and usage guidance.
 
 #### E3.3 — Health-check workflow
@@ -1149,7 +1168,7 @@ Each check cycle follows this pattern across all services in the trigger:
    - Severity: `HEALTHY` | `WARNING` | `CRITICAL`
    - Findings summary with evidence from each tool
    - Correlation analysis (deploy time vs. issue onset)
-   - Recommendations (rollback? investigate further? wait and see?)
+    - Recommendations (investigate further, monitor closely, or escalate to the owning team)
 
 #### E3.4 — Escalation logic
 
@@ -1213,8 +1232,8 @@ Strategy:
 **Goal**: ESS posts clear, actionable health reports to MS Teams.
 
 Phase 1.5 pulls forward the minimal Datadog-only unattended notification path.
-Phase 4 remains the place for richer card design, threaded investigation updates,
-and broader multi-tool reporting.
+Phase 4 extends that path with richer card design, correlated investigation
+follow-up delivery, and broader multi-tool reporting.
 
 #### E4.1 — MS Teams webhook publisher
 
@@ -1232,9 +1251,17 @@ class TeamsPublisher:
                     "content": card
                 }]
             }
-            resp = await session.post(webhook_url, json=payload, timeout=30)
+            resp = await session.post(
+                webhook_url,
+                json=payload,
+                timeout=self.config.teams_timeout_seconds,
+            )
             return resp.status == 200
 ```
+
+Implementation note: keep the Teams webhook timeout config-owned on `ESSConfig`
+and keep retry behaviour bounded under E4.4 rather than embedding new adapter-local
+magic numbers.
 
 #### E4.2 — Adaptive card templates
 
@@ -1250,14 +1277,14 @@ Cards include:
 - Service name, environment, deploy SHA, deployer
 - Timestamp and check cycle number
 - Direct links to Datadog APM, Sentry project, and relevant dashboards
-- Actionable recommendations ("Consider rollback", "Monitor closely", etc.)
+- Actionable recommendations ("Investigate the new release issues", "Monitor closely", "Escalate to the owning team")
 
 #### E4.3–E4.6 — Investigation publisher, retry handling, tests, docs
 
-- Investigation summaries posted as threaded replies to the initial alert card
-- Webhook POST retries with exponential backoff (3 attempts, 1s/2s/4s)
+- Investigation summaries posted as correlated follow-up cards on the same Teams webhook path
+- Webhook POST retries with exponential backoff (3 retry attempts, 1s/2s/4s)
 - Unit tests with mocked webhook responses
-- Configuration guide for setting up MS Teams webhooks
+- Configuration guide for setting up MS Teams webhooks and understanding webhook transport limits
 
 ---
 
@@ -1274,6 +1301,8 @@ hardening, self-observability metrics, deployment packaging, and final audits.
 ```dockerfile
 FROM python:3.14-slim
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 # Install Pup CLI
 RUN curl -fsSL https://github.com/datadog-labs/pup/releases/latest/download/pup-linux-amd64 \
     -o /usr/local/bin/pup && chmod +x /usr/local/bin/pup
@@ -1285,8 +1314,8 @@ RUN curl -fsSL https://github.com/datadog-labs/pup/releases/latest/download/pup-
 # RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs
 
 WORKDIR /app
-COPY pyproject.toml .
-RUN pip install uv && uv sync --frozen
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 
 COPY . .
 CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
@@ -1308,6 +1337,7 @@ notify_ess:
             "gitlab_pipeline_id": "'${CI_PIPELINE_ID}'",
             "gitlab_project": "'${CI_PROJECT_PATH}'",
             "commit_sha": "'${CI_COMMIT_SHA}'",
+            "release_version": "'${RELEASE_VERSION}'",
             "deployed_by": "'${GITLAB_USER_LOGIN}'",
             "deployed_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
             "environment": "production",
@@ -1318,6 +1348,7 @@ notify_ess:
               "name": "'${CI_PROJECT_NAME}'",
               "datadog_service_name": "'${DD_SERVICE_NAME}'",
               "sentry_project": "'${SENTRY_PROJECT}'",
+              "sentry_project_id": '${SENTRY_PROJECT_ID}',
               "infrastructure": "k8s"
             }
           ]
@@ -1326,6 +1357,11 @@ notify_ess:
     - main
   when: on_success
 ```
+
+`RELEASE_VERSION` must match the exact Sentry SDK `release` tag for the
+deployed build. Datadog-only services can omit the `sentry_project` fields, but
+Sentry-enabled services must send both `sentry_project` and
+`sentry_project_id`.
 
 #### E5.3 — Self-observability
 

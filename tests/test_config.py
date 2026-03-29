@@ -40,6 +40,9 @@ class TestConfigDefaults:
         cfg = ESSConfig(_env_file=None, dd_api_key="k", dd_app_key="a", sentry_auth_token="s")
         assert cfg.default_teams_webhook_url is None
         assert cfg.teams_timeout_seconds == 10
+        assert cfg.teams_delivery_mode == "real-world"
+        assert cfg.teams_retry_attempts == 3
+        assert cfg.teams_retry_backoff_seconds == 1.0
 
     def test_phase_1_5_trace_defaults_are_disabled(
         self,
@@ -79,6 +82,9 @@ class TestConfigDefaults:
     ) -> None:
         monkeypatch.setenv("ESS_TEAMS_ENABLED", "true")
         monkeypatch.setenv("ESS_TEAMS_TIMEOUT_SECONDS", "17")
+        monkeypatch.setenv("ESS_TEAMS_DELIVERY_MODE", "all")
+        monkeypatch.setenv("ESS_TEAMS_RETRY_ATTEMPTS", "4")
+        monkeypatch.setenv("ESS_TEAMS_RETRY_BACKOFF_SECONDS", "2")
         monkeypatch.setenv("ESS_DEBUG_TRACE_ENABLED", "true")
         monkeypatch.setenv("ESS_AGENT_TRACE_PATH", "custom-trace.jsonl")
 
@@ -86,6 +92,9 @@ class TestConfigDefaults:
 
         assert cfg.teams_enabled is True
         assert cfg.teams_timeout_seconds == 17
+        assert cfg.teams_delivery_mode == "all"
+        assert cfg.teams_retry_attempts == 4
+        assert cfg.teams_retry_backoff_seconds == 2.0
         assert cfg.debug_trace_enabled is True
         assert cfg.agent_trace_path == Path("custom-trace.jsonl")
 

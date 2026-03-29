@@ -79,6 +79,18 @@ class ESSConfig(BaseSettings):
         default=10,
         validation_alias="ESS_TEAMS_TIMEOUT_SECONDS",
     )
+    teams_delivery_mode: str = Field(
+        default="real-world",
+        validation_alias="ESS_TEAMS_DELIVERY_MODE",
+    )
+    teams_retry_attempts: int = Field(
+        default=3,
+        validation_alias="ESS_TEAMS_RETRY_ATTEMPTS",
+    )
+    teams_retry_backoff_seconds: float = Field(
+        default=1.0,
+        validation_alias="ESS_TEAMS_RETRY_BACKOFF_SECONDS",
+    )
 
     # -------------------------------------------------------------------------
     # Debug trace sink (Phase 1.5 bridge toward OpenTelemetry export)
@@ -107,6 +119,17 @@ class ESSConfig(BaseSettings):
         if upper not in valid:
             raise ValueError(f"log_level must be one of {valid}, got {v!r}")
         return upper
+
+    @field_validator("teams_delivery_mode")
+    @classmethod
+    def _validate_teams_delivery_mode(cls, v: str) -> str:
+        normalised = v.strip().lower().replace("_", "-")
+        valid = {"all", "real-world"}
+        if normalised not in valid:
+            raise ValueError(
+                f"teams_delivery_mode must be one of {sorted(valid)}, got {v!r}"
+            )
+        return normalised
 
     def model_post_init(self, __context: object) -> None:
         """Sync config-owned runtime environment overrides into ``os.environ``."""

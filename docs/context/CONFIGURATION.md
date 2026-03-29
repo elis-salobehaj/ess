@@ -62,9 +62,17 @@ typed helper `ESSConfig.sentry_base_url()`, which returns the `/api/0` base used
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ESS_TEAMS_ENABLED` | No | `false` | Enable outbound Teams delivery for repeated-warning, critical, and summary notifications |
+| `ESS_TEAMS_ENABLED` | No | `false` | Enable outbound Teams delivery on the configured runtime path |
 | `DEFAULT_TEAMS_WEBHOOK_URL` | No | — | Default Teams webhook URL |
 | `ESS_TEAMS_TIMEOUT_SECONDS` | No | `10` | Explicit timeout for each Teams webhook request |
+| `ESS_TEAMS_DELIVERY_MODE` | No | `real-world` | Teams delivery policy: `real-world` posts critical alerts immediately, stops the monitoring window after that critical cycle, and defers warnings to completion; `all` posts every ESS card type for review/testing |
+| `ESS_TEAMS_RETRY_ATTEMPTS` | No | `3` | Number of retry attempts after the initial Teams webhook failure for retryable errors |
+| `ESS_TEAMS_RETRY_BACKOFF_SECONDS` | No | `1` | Base backoff used for retryable Teams webhook failures (`1s`, `2s`, `4s`, ...) |
+
+Notes:
+
+- `real-world` is the default, suppresses the end-of-window summary card in Teams, and ends monitoring early after a critical result.
+- With the current Incoming Webhook transport, ESS cannot post investigation follow-ups as true thread replies. Those require Microsoft Graph or a bot transport with a parent message ID.
 
 ### Debug Trace
 

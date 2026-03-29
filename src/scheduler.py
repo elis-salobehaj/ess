@@ -45,6 +45,8 @@ class MonitoringSession:
     status: str = "scheduled"  # scheduled | running | completed | cancelled | error
     next_check_at: datetime | None = None
     last_error: str | None = None
+    stop_requested: bool = False
+    stop_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +171,30 @@ class ESSScheduler:
         logger.info("Monitoring session cancelled", job_id=job_id)
         return True
 
+    async def request_early_completion(self, job_id: str, *, reason: str) -> bool:
+        """Mark an active monitoring session for completion after the current cycle.
+
+        Returns ``True`` if the session was updated, ``False`` if not found or
+        already terminal.
+        """
+        async with self._lock:
+            session = self._sessions.get(job_id)
+            if session is None or session.status in ("completed", "cancelled", "error"):
+                return False
+            session.stop_requested = True
+            session.stop_reason = reason
+            session.next_check_at = None
+
+        with contextlib.suppress(Exception):
+            self._scheduler.remove_job(job_id)
+
+        logger.info(
+            "Monitoring session marked for early completion",
+            job_id=job_id,
+            reason=reason,
+        )
+        return True
+
     def get_session(self, job_id: str) -> MonitoringSession | None:
         return self._sessions.get(job_id)
 
@@ -229,6 +255,10 @@ class ESSScheduler:
         # Check whether the window has closed (APScheduler fires end_date
         # inclusive; we also handle the case where checks_completed reached
         # checks_planned first).
+        if session.stop_requested:
+            await self._complete_session(job_id, on_complete_fn)
+            return
+
         now = datetime.now(tz=UTC)
         if now >= end_time or session.checks_completed >= session.checks_planned:
             await self._complete_session(job_id, on_complete_fn)
@@ -262,6 +292,7 @@ class ESSScheduler:
             job_id=job_id,
             checks_completed=session.checks_completed,
             overall_severity=self._aggregate_severity(session),
+            stop_reason=session.stop_reason,
         )
 
     @staticmethod

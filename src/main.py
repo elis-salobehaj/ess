@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from src.agent.health_check_agent import DatadogHealthCheckAgent
 from src.agent.trace import AgentTraceRecorder
 from src.config import ESSConfig
-from src.llm_client import make_triage_client
+from src.llm_client import make_investigation_client, make_triage_client
 from src.models import (
     CancelResponse,
     DeployResponse,
@@ -42,11 +42,18 @@ from src.models import (
 )
 from src.notifications import (
     NotificationDecision,
+    NotificationKind,
+    TeamsDeliveryMode,
+    TeamsDeliveryResult,
     TeamsPublisher,
+    build_completion_warning_notification,
+    build_investigation_notification,
     build_summary_notification,
     build_teams_card,
     evaluate_cycle_notification,
+    resolve_teams_delivery_mode,
     resolve_webhook_url,
+    supports_thread_replies,
 )
 from src.scheduler import ESSScheduler, MonitoringSession
 from src.tools.normalise import pup_to_tool_result
@@ -109,12 +116,18 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
         enabled=cfg.debug_trace_enabled,
         path=cfg.agent_trace_path,
     )
-    teams_publisher = TeamsPublisher(timeout_seconds=cfg.teams_timeout_seconds)
+    teams_publisher = TeamsPublisher(
+        timeout_seconds=cfg.teams_timeout_seconds,
+        retry_attempts=cfg.teams_retry_attempts,
+        retry_backoff_seconds=cfg.teams_retry_backoff_seconds,
+    )
     triage_client = make_triage_client(cfg)
+    investigation_client = make_investigation_client(cfg)
     sentry_tool = SentryTool(config=cfg)
     datadog_agent = DatadogHealthCheckAgent(
         bedrock_client=triage_client,
         pup_tool=pup_tool,
+        investigation_client=investigation_client,
         sentry_tool=sentry_tool,
         trace_recorder=trace_recorder,
     )
@@ -221,6 +234,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
                     cfg,
                     trace_recorder,
                     teams_publisher,
+                    scheduler,
                 ),
             )
         except ValueError as exc:
@@ -452,6 +466,7 @@ def _build_completion_callback(
 ):
     async def _on_complete(session: MonitoringSession) -> None:
         overall_severity = _aggregate_session_severity(session)
+        delivery_mode = resolve_teams_delivery_mode(cfg, session)
 
         await trace_recorder.emit(
             "session.completed",
@@ -468,13 +483,36 @@ def _build_completion_callback(
             },
         )
 
-        await _deliver_notification(
-            cfg,
-            trace_recorder,
-            teams_publisher,
-            session,
-            build_summary_notification(session),
-        )
+        if delivery_mode == TeamsDeliveryMode.ALL:
+            await _deliver_notification(
+                cfg,
+                trace_recorder,
+                teams_publisher,
+                session,
+                build_summary_notification(session),
+            )
+        else:
+            warning_decision = build_completion_warning_notification(session)
+            if warning_decision is not None:
+                await _deliver_notification(
+                    cfg,
+                    trace_recorder,
+                    teams_publisher,
+                    session,
+                    warning_decision,
+                )
+            else:
+                await trace_recorder.emit(
+                    "notification.skipped",
+                    trace_id=session.job_id,
+                    cycle_number=session.checks_completed or None,
+                    attributes={
+                        "kind": "completion",
+                        "reason": "completion_report_suppressed_real_world",
+                        "teams_enabled": cfg.teams_enabled,
+                        "overall_severity": overall_severity.value,
+                    },
+                )
 
         logger.info(
             "monitoring_session_completed",
@@ -491,8 +529,10 @@ def _build_result_callback(
     cfg: ESSConfig,
     trace_recorder: AgentTraceRecorder,
     teams_publisher: TeamsPublisher,
+    scheduler: ESSScheduler | None = None,
 ):
     async def _on_result(session: MonitoringSession, result: HealthCheckResult) -> None:
+        delivery_mode = resolve_teams_delivery_mode(cfg, session)
         decision, reason = evaluate_cycle_notification(session, result)
         if decision is None:
             await trace_recorder.emit(
@@ -508,12 +548,81 @@ def _build_result_callback(
             )
             return
 
-        await _deliver_notification(
+        if (
+            delivery_mode == TeamsDeliveryMode.REAL_WORLD
+            and decision.kind == NotificationKind.WARNING
+        ):
+            await trace_recorder.emit(
+                "notification.skipped",
+                trace_id=session.job_id,
+                cycle_number=result.cycle_number,
+                attributes={
+                    "kind": decision.kind.value,
+                    "reason": "warning_deferred_until_completion",
+                    "teams_enabled": cfg.teams_enabled,
+                    "overall_severity": result.overall_severity.value,
+                },
+            )
+            return
+
+        delivery = await _deliver_notification(
             cfg,
             trace_recorder,
             teams_publisher,
             session,
             decision,
+        )
+        if (
+            delivery_mode == TeamsDeliveryMode.REAL_WORLD
+            and decision.kind == NotificationKind.CRITICAL
+            and scheduler is not None
+        ):
+            stop_requested = await scheduler.request_early_completion(
+                session.job_id,
+                reason="critical_alert_detected",
+            )
+            if stop_requested:
+                await trace_recorder.emit(
+                    "monitoring.early_completion_requested",
+                    trace_id=session.job_id,
+                    cycle_number=result.cycle_number,
+                    attributes={
+                        "reason": "critical_alert_detected",
+                        "notification_delivered": delivery.ok if delivery is not None else False,
+                        "teams_enabled": cfg.teams_enabled,
+                        "overall_severity": result.overall_severity.value,
+                    },
+                )
+        if delivery is None or not delivery.ok:
+            return
+
+        investigation_decision = build_investigation_notification(session, result, decision)
+        if investigation_decision is None:
+            return
+
+        if (
+            delivery_mode == TeamsDeliveryMode.REAL_WORLD
+            and not supports_thread_replies(cfg, session)
+        ):
+            await trace_recorder.emit(
+                "notification.skipped",
+                trace_id=session.job_id,
+                cycle_number=result.cycle_number,
+                attributes={
+                    "kind": investigation_decision.kind.value,
+                    "reason": "thread_reply_not_supported_for_webhook",
+                    "teams_enabled": cfg.teams_enabled,
+                    "overall_severity": result.overall_severity.value,
+                },
+            )
+            return
+
+        await _deliver_notification(
+            cfg,
+            trace_recorder,
+            teams_publisher,
+            session,
+            investigation_decision,
         )
 
     return _on_result
@@ -525,7 +634,7 @@ async def _deliver_notification(
     teams_publisher: TeamsPublisher,
     session: MonitoringSession,
     decision: NotificationDecision,
-) -> None:
+) -> TeamsDeliveryResult | None:
     webhook_url, webhook_source = resolve_webhook_url(session, cfg.default_teams_webhook_url)
 
     if not cfg.teams_enabled:
@@ -539,7 +648,7 @@ async def _deliver_notification(
                 "teams_enabled": False,
             },
         )
-        return
+        return None
 
     if webhook_url is None:
         await trace_recorder.emit(
@@ -557,7 +666,7 @@ async def _deliver_notification(
             job_id=session.job_id,
             kind=decision.kind.value,
         )
-        return
+        return None
 
     await trace_recorder.emit(
         "notification.attempted",
@@ -571,7 +680,10 @@ async def _deliver_notification(
         },
     )
 
-    delivery = await teams_publisher.post_card(webhook_url, build_teams_card(session, decision))
+    delivery = await teams_publisher.post_card(
+        webhook_url,
+        build_teams_card(cfg, session, decision),
+    )
     if delivery.ok:
         await trace_recorder.emit(
             "notification.delivered",
@@ -581,6 +693,7 @@ async def _deliver_notification(
                 "kind": decision.kind.value,
                 "status_code": delivery.status_code,
                 "response_text": delivery.response_text,
+                "attempts": delivery.attempts,
                 "webhook_source": webhook_source,
             },
         )
@@ -589,8 +702,9 @@ async def _deliver_notification(
             job_id=session.job_id,
             kind=decision.kind.value,
             status_code=delivery.status_code,
+            attempts=delivery.attempts,
         )
-        return
+        return delivery
 
     await trace_recorder.emit(
         "notification.failed",
@@ -601,6 +715,7 @@ async def _deliver_notification(
             "status_code": delivery.status_code,
             "error": delivery.error,
             "response_text": delivery.response_text,
+            "attempts": delivery.attempts,
             "webhook_source": webhook_source,
         },
     )
@@ -610,7 +725,9 @@ async def _deliver_notification(
         kind=decision.kind.value,
         status_code=delivery.status_code,
         error=delivery.error,
+        attempts=delivery.attempts,
     )
+    return delivery
 
 
 def _aggregate_session_severity(session: MonitoringSession) -> HealthSeverity:

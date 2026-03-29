@@ -36,17 +36,20 @@ _EXAMPLE_TRIGGER_PATH = (
 
 
 class _FakeTeamsPublisher:
-    def __init__(self, delivery: TeamsDeliveryResult | None = None) -> None:
-        self._delivery = delivery or TeamsDeliveryResult(
-            ok=True,
-            status_code=200,
-            response_text="1",
-        )
+    def __init__(self, deliveries: list[TeamsDeliveryResult] | None = None) -> None:
+        self._deliveries = deliveries or [
+            TeamsDeliveryResult(
+                ok=True,
+                status_code=200,
+                response_text="1",
+            )
+        ]
         self.calls: list[tuple[str, dict]] = []
 
     async def post_card(self, webhook_url: str, card: dict) -> TeamsDeliveryResult:
         self.calls.append((webhook_url, card))
-        return self._delivery
+        index = min(len(self.calls) - 1, len(self._deliveries) - 1)
+        return self._deliveries[index]
 
 
 def _session() -> MonitoringSession:
@@ -212,7 +215,85 @@ class TestNotificationCallbacks:
         assert events[-1]["event_type"] == "notification.skipped"
         assert events[-1]["attributes"]["reason"] == "teams_disabled"
 
-    async def test_result_callback_posts_repeated_warning(self, tmp_path) -> None:
+    async def test_result_callback_posts_repeated_warning_and_investigation_follow_up(
+        self,
+        tmp_path,
+    ) -> None:
+        session = _session()
+        first = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=1,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.WARNING,
+            findings=[
+                HealthFinding(
+                    tool="datadog.error_logs",
+                    severity=HealthSeverity.WARNING,
+                    summary="warning one",
+                )
+            ],
+            services_checked=["example-service"],
+        )
+        second = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=2,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.WARNING,
+            findings=[
+                HealthFinding(
+                    tool="agent.investigation_summary",
+                    severity=HealthSeverity.WARNING,
+                    summary="example-service: Severity: WARNING",
+                    details="Severity: WARNING\nNew release issues correlate with /auth failures.",
+                ),
+                HealthFinding(
+                    tool="datadog.error_logs",
+                    severity=HealthSeverity.WARNING,
+                    summary="example-service: warning two",
+                ),
+                HealthFinding(
+                    tool="sentry.new_release_issues",
+                    severity=HealthSeverity.WARNING,
+                    summary="example-service: new release issues detected",
+                ),
+            ],
+            services_checked=["example-service"],
+        )
+        session.checks_completed = 2
+        session.results.extend([first, second])
+        trace_path = tmp_path / "agent_trace.jsonl"
+        recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        publisher = _FakeTeamsPublisher()
+        callback = _build_result_callback(
+            ESSConfig(
+                _env_file=None,
+                dd_api_key="k",
+                dd_app_key="a",
+                sentry_auth_token="s",
+                teams_enabled=True,
+                teams_delivery_mode="all",
+                default_teams_webhook_url="https://outlook.office.com/webhook/test",
+            ),
+            recorder,
+            publisher,
+        )
+
+        await callback(session, second)
+
+        session_trace_path = recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        delivered_events = [
+            event for event in events if event["event_type"] == "notification.delivered"
+        ]
+        assert len(publisher.calls) == 2
+        assert len(delivered_events) == 2
+        assert publisher.calls[0][1]["body"][0]["text"] == "ESS observed repeated deploy warnings"
+        assert publisher.calls[1][1]["body"][0]["text"] == "ESS investigation follow-up"
+
+    async def test_result_callback_defers_warning_until_completion_in_real_world_mode(
+        self,
+        tmp_path,
+    ) -> None:
         session = _session()
         first = HealthCheckResult(
             job_id=session.job_id,
@@ -254,6 +335,7 @@ class TestNotificationCallbacks:
                 dd_app_key="a",
                 sentry_auth_token="s",
                 teams_enabled=True,
+                teams_delivery_mode="real-world",
                 default_teams_webhook_url="https://outlook.office.com/webhook/test",
             ),
             recorder,
@@ -264,9 +346,120 @@ class TestNotificationCallbacks:
 
         session_trace_path = recorder.path_for_trace(session.job_id)
         events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
-        assert publisher.calls
-        assert events[-2]["event_type"] == "notification.attempted"
-        assert events[-1]["event_type"] == "notification.delivered"
+        assert publisher.calls == []
+        assert events[-1]["event_type"] == "notification.skipped"
+        assert events[-1]["attributes"]["reason"] == "warning_deferred_until_completion"
+
+    async def test_result_callback_skips_investigation_follow_up_when_thread_reply_unsupported(
+        self,
+        tmp_path,
+    ) -> None:
+        session = _session()
+        result = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=1,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.CRITICAL,
+            findings=[
+                HealthFinding(
+                    tool="datadog.monitor_status",
+                    severity=HealthSeverity.CRITICAL,
+                    summary="critical monitor",
+                ),
+                HealthFinding(
+                    tool="agent.investigation_summary",
+                    severity=HealthSeverity.WARNING,
+                    summary="example-service: Severity: CRITICAL",
+                    details="Severity: CRITICAL\nImpact confirmed after deploy.",
+                ),
+            ],
+            services_checked=["example-service"],
+        )
+        session.checks_completed = 1
+        session.results.append(result)
+        trace_path = tmp_path / "agent_trace.jsonl"
+        recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        publisher = _FakeTeamsPublisher()
+        callback = _build_result_callback(
+            ESSConfig(
+                _env_file=None,
+                dd_api_key="k",
+                dd_app_key="a",
+                sentry_auth_token="s",
+                teams_enabled=True,
+                teams_delivery_mode="real-world",
+                default_teams_webhook_url="https://outlook.office.com/webhook/test",
+            ),
+            recorder,
+            publisher,
+        )
+
+        await callback(session, result)
+
+        session_trace_path = recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        delivered_events = [
+            event for event in events if event["event_type"] == "notification.delivered"
+        ]
+        assert len(publisher.calls) == 1
+        assert len(delivered_events) == 1
+        assert events[-1]["event_type"] == "notification.skipped"
+        assert events[-1]["attributes"]["reason"] == "thread_reply_not_supported_for_webhook"
+
+    async def test_result_callback_requests_early_completion_for_real_world_critical(
+        self,
+        tmp_path,
+    ) -> None:
+        session = _session()
+        result = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=1,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.CRITICAL,
+            findings=[
+                HealthFinding(
+                    tool="datadog.monitor_status",
+                    severity=HealthSeverity.CRITICAL,
+                    summary="critical monitor",
+                )
+            ],
+            services_checked=["example-service"],
+        )
+        session.checks_completed = 1
+        session.results.append(result)
+        trace_path = tmp_path / "agent_trace.jsonl"
+        recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        publisher = _FakeTeamsPublisher()
+        scheduler = AsyncMock()
+        scheduler.request_early_completion.return_value = True
+        callback = _build_result_callback(
+            ESSConfig(
+                _env_file=None,
+                dd_api_key="k",
+                dd_app_key="a",
+                sentry_auth_token="s",
+                teams_enabled=True,
+                teams_delivery_mode="real-world",
+                default_teams_webhook_url="https://outlook.office.com/webhook/test",
+            ),
+            recorder,
+            publisher,
+            scheduler,
+        )
+
+        await callback(session, result)
+
+        session_trace_path = recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        scheduler.request_early_completion.assert_awaited_once_with(
+            session.job_id,
+            reason="critical_alert_detected",
+        )
+        assert len(publisher.calls) == 1
+        assert any(
+            event["event_type"] == "monitoring.early_completion_requested"
+            for event in events
+        )
 
     async def test_completion_callback_posts_summary(self, tmp_path) -> None:
         session = _session()
@@ -296,6 +489,7 @@ class TestNotificationCallbacks:
                 dd_app_key="a",
                 sentry_auth_token="s",
                 teams_enabled=True,
+                teams_delivery_mode="all",
                 default_teams_webhook_url="https://outlook.office.com/webhook/test",
             ),
             recorder,
@@ -309,3 +503,110 @@ class TestNotificationCallbacks:
         assert publisher.calls
         assert events[0]["event_type"] == "session.completed"
         assert events[-1]["event_type"] == "notification.delivered"
+        assert publisher.calls[0][1]["body"][0]["text"] == "ESS monitoring window complete"
+
+    async def test_completion_callback_posts_warning_only_in_real_world_mode(
+        self,
+        tmp_path,
+    ) -> None:
+        session = _session()
+        first = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=1,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.WARNING,
+            findings=[
+                HealthFinding(
+                    tool="datadog.error_logs",
+                    severity=HealthSeverity.WARNING,
+                    summary="warning one",
+                )
+            ],
+            services_checked=["example-service"],
+        )
+        second = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=2,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.WARNING,
+            findings=[
+                HealthFinding(
+                    tool="datadog.monitor_status",
+                    severity=HealthSeverity.WARNING,
+                    summary="warning two",
+                )
+            ],
+            services_checked=["example-service"],
+        )
+        session.checks_completed = 2
+        session.results.extend([first, second])
+        trace_path = tmp_path / "agent_trace.jsonl"
+        recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        publisher = _FakeTeamsPublisher()
+        callback = _build_completion_callback(
+            ESSConfig(
+                _env_file=None,
+                dd_api_key="k",
+                dd_app_key="a",
+                sentry_auth_token="s",
+                teams_enabled=True,
+                teams_delivery_mode="real-world",
+                default_teams_webhook_url="https://outlook.office.com/webhook/test",
+            ),
+            recorder,
+            publisher,
+        )
+
+        await callback(session)
+
+        session_trace_path = recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        assert len(publisher.calls) == 1
+        assert events[-1]["event_type"] == "notification.delivered"
+        assert publisher.calls[0][1]["body"][0]["text"] == "ESS observed repeated deploy warnings"
+
+    async def test_completion_callback_suppresses_summary_in_real_world_mode(
+        self,
+        tmp_path,
+    ) -> None:
+        session = _session()
+        result = HealthCheckResult(
+            job_id=session.job_id,
+            cycle_number=1,
+            checked_at=datetime.now(tz=UTC),
+            overall_severity=HealthSeverity.HEALTHY,
+            findings=[
+                HealthFinding(
+                    tool="datadog.apm_stats",
+                    severity=HealthSeverity.HEALTHY,
+                    summary="all clear",
+                )
+            ],
+            services_checked=["example-service"],
+        )
+        session.checks_completed = 1
+        session.results.append(result)
+        trace_path = tmp_path / "agent_trace.jsonl"
+        recorder = AgentTraceRecorder(enabled=True, path=trace_path)
+        publisher = _FakeTeamsPublisher()
+        callback = _build_completion_callback(
+            ESSConfig(
+                _env_file=None,
+                dd_api_key="k",
+                dd_app_key="a",
+                sentry_auth_token="s",
+                teams_enabled=True,
+                teams_delivery_mode="real-world",
+                default_teams_webhook_url="https://outlook.office.com/webhook/test",
+            ),
+            recorder,
+            publisher,
+        )
+
+        await callback(session)
+
+        session_trace_path = recorder.path_for_trace(session.job_id)
+        events = [json.loads(line) for line in session_trace_path.read_text().splitlines()]
+        assert publisher.calls == []
+        assert events[-1]["event_type"] == "notification.skipped"
+        assert events[-1]["attributes"]["reason"] == "completion_report_suppressed_real_world"

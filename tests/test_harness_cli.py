@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from src.harness_cli import DEFAULT_TIMEOUT_SECONDS, TIMEOUT_BUFFER_SECONDS, app
+from src.config import ESSConfig
+from src.harness_cli import (
+    DEFAULT_TIMEOUT_SECONDS,
+    TIMEOUT_BUFFER_SECONDS,
+    _build_teams_scenario_results,
+    _run_teams_scenario_batch,
+    app,
+)
 
 runner = CliRunner()
 
@@ -125,3 +133,203 @@ def test_live_timeout_defaults_to_trigger_window_plus_buffer(tmp_path: Path) -> 
     timeout_seconds = _resolve_timeout_seconds(trigger, None)
 
     assert timeout_seconds == max(DEFAULT_TIMEOUT_SECONDS, 10 * 60 + TIMEOUT_BUFFER_SECONDS)
+
+
+def test_build_teams_scenario_results_repeated_warning(tmp_path: Path) -> None:
+    trigger = tmp_path / "trigger.json"
+    trigger.write_text(
+        json.dumps(
+            {
+                "deployment": {
+                    "gitlab_pipeline_id": "123",
+                    "gitlab_project": "group/repo",
+                    "commit_sha": "abcdef1234567",
+                    "release_version": "2.4.6",
+                    "deployed_by": "jane.doe",
+                    "deployed_at": "2026-03-29T12:00:00Z",
+                    "environment": "qa",
+                    "regions": ["ca"],
+                },
+                "services": [
+                    {
+                        "name": "example-service",
+                        "datadog_service_name": "example-service",
+                    }
+                ],
+                "monitoring": {
+                    "window_minutes": 5,
+                    "check_interval_minutes": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from src.harness_cli import _load_trigger_payload
+
+    results = _build_teams_scenario_results(
+        _load_trigger_payload(trigger),
+        job_id="ess-scenario-test",
+        scenario_name="repeated-warning",
+    )
+
+    assert len(results) == 2
+    assert results[0].overall_severity == "WARNING"
+    assert results[1].overall_severity == "WARNING"
+
+
+def test_run_teams_scenario_batch_posts_expected_cards(tmp_path: Path, monkeypatch) -> None:
+    trigger = tmp_path / "trigger.json"
+    trace_path = tmp_path / "teams_scenarios_agent_trace.jsonl"
+    trigger.write_text(
+        json.dumps(
+            {
+                "deployment": {
+                    "gitlab_pipeline_id": "123",
+                    "gitlab_project": "group/repo",
+                    "commit_sha": "abcdef1234567",
+                    "release_version": "2.4.6",
+                    "deployed_by": "jane.doe",
+                    "deployed_at": "2026-03-29T12:00:00Z",
+                    "environment": "qa",
+                    "regions": ["ca"],
+                },
+                "services": [
+                    {
+                        "name": "example-service",
+                        "datadog_service_name": "example-service",
+                        "sentry_project": "example-service",
+                        "sentry_project_id": 7,
+                    }
+                ],
+                "monitoring": {
+                    "window_minutes": 5,
+                    "check_interval_minutes": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    posted_cards: list[dict[str, object]] = []
+
+    async def fake_post_card(self, webhook_url: str, card: dict[str, object]):
+        del self
+        posted_cards.append({"webhook_url": webhook_url, "card": card})
+
+        from src.notifications import TeamsDeliveryResult
+
+        return TeamsDeliveryResult(ok=True, status_code=200, response_text="1", attempts=1)
+
+    monkeypatch.setattr("src.harness_cli.TeamsPublisher.post_card", fake_post_card)
+
+    cfg = ESSConfig(
+        _env_file=None,
+        dd_api_key="k",
+        dd_app_key="a",
+        sentry_auth_token="s",
+        sentry_host="https://sentry.example.com",
+        sentry_org="example",
+        teams_enabled=True,
+        default_teams_webhook_url="https://outlook.office.com/webhook/test",
+        debug_trace_enabled=True,
+        agent_trace_path=trace_path,
+    )
+
+    summaries = asyncio.run(
+        _run_teams_scenario_batch(
+            cfg,
+            trigger_path=trigger,
+            scenarios=["healthy-summary", "repeated-warning", "critical-investigation"],
+            label="ESS Teams Scenario Test",
+            teams_mode="all",
+            inter_scenario_delay_seconds=0,
+        )
+    )
+
+    headlines = [item["card"]["body"][1]["text"] for item in posted_cards]
+    assert len(summaries) == 3
+    assert len(posted_cards) == 6
+    assert "ESS monitoring window complete" in headlines
+    assert "ESS observed repeated deploy warnings" in headlines
+    assert "ESS investigation follow-up" in headlines
+
+
+def test_run_teams_scenario_batch_real_world_posts_only_operational_cards(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    trigger = tmp_path / "trigger.json"
+    trace_path = tmp_path / "teams_scenarios_agent_trace.jsonl"
+    trigger.write_text(
+        json.dumps(
+            {
+                "deployment": {
+                    "gitlab_pipeline_id": "123",
+                    "gitlab_project": "group/repo",
+                    "commit_sha": "abcdef1234567",
+                    "release_version": "2.4.6",
+                    "deployed_by": "jane.doe",
+                    "deployed_at": "2026-03-29T12:00:00Z",
+                    "environment": "qa",
+                    "regions": ["ca"],
+                },
+                "services": [
+                    {
+                        "name": "example-service",
+                        "datadog_service_name": "example-service",
+                        "sentry_project": "example-service",
+                        "sentry_project_id": 7,
+                    }
+                ],
+                "monitoring": {
+                    "window_minutes": 5,
+                    "check_interval_minutes": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    posted_cards: list[dict[str, object]] = []
+
+    async def fake_post_card(self, webhook_url: str, card: dict[str, object]):
+        del self
+        posted_cards.append({"webhook_url": webhook_url, "card": card})
+
+        from src.notifications import TeamsDeliveryResult
+
+        return TeamsDeliveryResult(ok=True, status_code=200, response_text="1", attempts=1)
+
+    monkeypatch.setattr("src.harness_cli.TeamsPublisher.post_card", fake_post_card)
+
+    cfg = ESSConfig(
+        _env_file=None,
+        dd_api_key="k",
+        dd_app_key="a",
+        sentry_auth_token="s",
+        sentry_host="https://sentry.example.com",
+        sentry_org="example",
+        teams_enabled=True,
+        teams_delivery_mode="real-world",
+        default_teams_webhook_url="https://outlook.office.com/webhook/test",
+        debug_trace_enabled=True,
+        agent_trace_path=trace_path,
+    )
+
+    asyncio.run(
+        _run_teams_scenario_batch(
+            cfg,
+            trigger_path=trigger,
+            scenarios=["healthy-summary", "repeated-warning", "critical-investigation"],
+            label="ESS Teams Scenario Test",
+            teams_mode="real-world",
+            inter_scenario_delay_seconds=0,
+        )
+    )
+
+    headlines = [item["card"]["body"][0]["text"] for item in posted_cards]
+    assert headlines == [
+        "ESS observed repeated deploy warnings",
+        "ESS detected a critical deploy issue",
+    ]
