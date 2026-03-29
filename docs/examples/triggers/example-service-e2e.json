@@ -3,6 +3,7 @@
         "gitlab_pipeline_id": "qa-e2e-20260324-001",
         "gitlab_project": "example/service",
         "commit_sha": "abc1234def567890abc1234def567890abc1234",
+        "release_version": "2026.03.24-qa.1",
         "deployed_by": "github-copilot",
         "deployed_at": "2026-03-24T14:05:00Z",
         "environment": "qa",
@@ -14,6 +15,8 @@
         {
             "name": "example-service",
             "datadog_service_name": "example-service",
+            "sentry_project": "example-service",
+            "sentry_project_id": 47,
             "infrastructure": "ECS Fargate"
         }
     ],
@@ -22,10 +25,11 @@
         "check_interval_minutes": 1
     },
     "extra_context": {
-        "scenario": "manual-end-to-end-datadog-pup-validation",
+        "scenario": "manual-end-to-end-datadog-and-sentry-context-validation",
         "notes": [
             "Datadog monitors tagged service:example-service,env:qa returned none at test setup time.",
             "Datadog logs search for service:example-service status:error over the last 30m returned no results at test setup time.",
+            "Sentry project metadata is included to mirror the release-aware ESS schema while keeping the example anonymized.",
             "APM stats for qa include example-service with servlet.request traffic.",
             "APM operations observed: servlet.request, jakarta_rs.request, mysql.query, okhttp.request, http.request."
         ]

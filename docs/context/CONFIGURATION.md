@@ -34,6 +34,15 @@ application code.
 | `SENTRY_AUTH_TOKEN` | Yes | — | Sentry auth token (project:read, event:read, issue:read) |
 | `SENTRY_HOST` | No | `sentry.example.com` | Self-hosted Sentry URL |
 | `SENTRY_ORG` | No | `example` | Sentry organisation slug |
+| `SENTRY_TIMEOUT_SECONDS` | No | `30` | Total timeout for each Sentry HTTP request |
+| `SENTRY_MAX_CONCURRENT` | No | `5` | Max parallel Sentry HTTP requests per ESS process |
+| `SENTRY_RATE_LIMIT_RETRIES` | No | `3` | Bounded retries for HTTP 429 responses |
+| `SENTRY_RETRY_DEFAULT_SECONDS` | No | `2` | Fallback delay when `Retry-After` is missing or invalid |
+| `SENTRY_CIRCUIT_BREAKER_THRESHOLD` | No | `3` | Consecutive failures before the Sentry adapter opens its circuit |
+
+`SENTRY_HOST` may be configured as either a bare hostname such as `sentry.example.com`
+or a full base URL such as `https://sentry.example.com`. ESS normalises this into the
+typed helper `ESSConfig.sentry_base_url()`, which returns the `/api/0` base used by the adapter.
 
 ### Log Scout
 

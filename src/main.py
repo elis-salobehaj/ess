@@ -51,6 +51,7 @@ from src.notifications import (
 from src.scheduler import ESSScheduler, MonitoringSession
 from src.tools.normalise import pup_to_tool_result
 from src.tools.pup_tool import PupTool
+from src.tools.sentry_tool import SentryTool
 
 # ---------------------------------------------------------------------------
 # Logging setup — configured at import time with INFO; apps that need a
@@ -110,9 +111,11 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     )
     teams_publisher = TeamsPublisher(timeout_seconds=cfg.teams_timeout_seconds)
     triage_client = make_triage_client(cfg)
+    sentry_tool = SentryTool(config=cfg)
     datadog_agent = DatadogHealthCheckAgent(
         bedrock_client=triage_client,
         pup_tool=pup_tool,
+        sentry_tool=sentry_tool,
         trace_recorder=trace_recorder,
     )
 
@@ -123,6 +126,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
         logger.info("ess_started", host=cfg.host, port=cfg.port)
         yield
         await scheduler.stop()
+        await sentry_tool.close()
         logger.info("ess_stopped")
 
     app = FastAPI(

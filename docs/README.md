@@ -20,12 +20,14 @@
 
 ## Current Runtime
 
-- Datadog-only Bedrock tool-calling loop is live.
+- Datadog-first Bedrock tool-calling is live.
+- The runtime now performs release-aware Sentry follow-up for degraded Sentry-enabled services using project details, release details, new release issue groups, and top issue details.
 - Native `AWS_BEARER_TOKEN_BEDROCK` auth is the supported Bedrock path.
 - Claude Sonnet 4.6 is the current runtime model for both triage and deeper investigation turns.
 - `_local_observability/` holds session-scoped trace artifacts and the shared debug log when debug tracing is enabled.
-- Live local validation has covered the 2-minute smoke payload plus healthy 15-minute and 30-minute runs on the real Bedrock path.
-- Sentry and Log Scout remain documented target components, not current runtime integrations.
+- Live local validation has covered the 2-minute smoke payload, a healthy 10-minute harness run, healthy 15-minute and 30-minute runs on the real Bedrock path, and a degraded harness run through the Datadog-to-Sentry branch.
+- The checked-in `ess-harness` CLI now covers both `live` runs against an already running ESS instance and a separate `degraded` validation command.
+- Full Bedrock-level multi-tool orchestration and Log Scout remain target components, not completed runtime integrations.
 
 ---
 
@@ -33,7 +35,7 @@
 
 | # | Plan | Status | Est. Hours |
 |---|------|--------|------------|
-| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Phase 1.5 implemented, review-complete, and validated through 2m, 15m, and 30m live runs | 80-120h |
+| 1 | **ESS Master Plan** ([plan](plans/active/ess-eye-of-sauron-service.md)) | Phase 1 ✅ — Phase 1.5 implemented, review-complete, and validated through 2m, 10m, 15m, and 30m live runs; Phase 2 release-aware Sentry work is implemented on the Datadog-first runtime path; the current active focus is Phase 3 orchestration | 80-120h |
 
 ### Implemented Plans
 
@@ -45,7 +47,7 @@
 
 | # | Plan | Status | Est. Hours |
 |---|------|--------|------------|
-| 3 | **Sentry Integration** ([plan](plans/backlog/ess-sentry-integration.md)) | Backlog | 20-30h |
+| 3 | **Sentry Integration** ([plan](plans/backlog/ess-sentry-integration.md)) | Phases S1-S4 are complete and review-complete; only deferred Phase S5 future work remains in backlog | 20-30h |
 | 4 | **Log Scout: Syslog Search Agent** ([plan](plans/backlog/ess-log-scout-syslog-agent.md)) | Backlog | 30-40h |
 
 ---
@@ -63,14 +65,19 @@
 ## Guides
 
 - [Getting Started](guides/GETTING_STARTED.md) — Local setup and first deploy trigger
-- [Development](guides/DEVELOPMENT.md) — Commands, testing, linting, Docker
+- [Development](guides/DEVELOPMENT.md) — Commands, testing, linting, Docker, and the Typer-based harness CLI
 - [Datadog-Only Unattended and Inspectable Ship](guides/DATADOG_ONLY_UNATTENDED_AND_INSPECTABLE_SHIP.md) — First-deliverable runtime modes, trace behavior, and operator checklist
 - [Datadog Agent Tools](guides/DATADOG_AGENT_TOOLS.md) — Bedrock tool schemas, Bedrock turn handling, prompt fragments, and Pup dispatch helpers
-- [Trigger End-to-End Datadog Pup Integration](guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md) — Live local smoke and extended-window validation against the current runtime
+- [Sentry REST Integration](guides/SENTRY_REST_INTEGRATION.md) — REST adapter behavior, Bedrock tool schemas, ToolResult mapping, and integration-test entry points
+- [Trigger End-to-End Datadog Pup Integration](guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md) — Live local smoke, `live` harness, `degraded` harness, and extended-window validation against the current runtime
 - [Teams Channel Integration](guides/TEAMS_CHANNEL_INTEGRATION.md) — Incoming Webhook setup and validation for ESS cycle and summary alerts
 
 ## Recent Review Reports
 
+- [S4 / Phase 2 Plan Review](plans/review-reports/ess-sentry-integration-plan-review-2026-03-29-r6p1.md) — Pre-implementation-quality audit of the S4 and Phase 2 plan surfaces after safe documentation remediations; the governing plans and active docs are now aligned for the release-aware Sentry slice
+- [Phase S4 Review](plans/review-reports/phase-s4-review-2026-03-29-q8m4.md) — Audit of the release-aware v1 runtime slice; Datadog-first Sentry follow-up, tests, docs, and plan bookkeeping are now complete for S4 and master-plan E2.7
+- [Phase 2 Sentry Review](plans/review-reports/phase-2-sentry-review-2026-03-28-k4n1.md) — Post-remediation audit of Sentry plan Phases S1/S2 and the master-plan Phase 2 slice; Bedrock tool layer, docs, and integration-test scaffolding are now in place while MCP and Log Scout remain deferred
+- [Master Plan Review](plans/review-reports/ess-eye-of-sauron-service-review-2026-03-28-r8n5.md) — Pre-implementation audit of the revised Sentry-first master-plan sequence; auto-remediated plan consistency and architecture issues before Phase 2 / Phase 3 expansion begins
 - [Phase 1.5 Final Follow-Up Review](plans/review-reports/phase-1-5-review-2026-03-28-m2v7.md) — Final audit after the Phase 1.5 cleanup and consistency pass, now updated with the successful 30-minute validation closeout
 - [Phase 1.5 Review](plans/review-reports/phase-1-5-review-2026-03-28-r4k8.md) — Post-remediation audit of the narrowed Datadog-only unattended and inspectable ship
 

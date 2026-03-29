@@ -7,11 +7,12 @@ Agentic AI post-deploy monitoring service. ESS watches production deployments
 in real time using Datadog, Sentry, and log search tools — orchestrated by an
 LLM reasoning loop — and escalates to MS Teams when issues are detected.
 
-Current runtime note: the live first deliverable is a Datadog-only monitoring
-path backed by Bedrock tool calling, deterministic Pup fallback, optional local
-debug artifacts under `_local_observability/`, and config-gated Teams delivery.
-Sentry and Log Scout remain planned but are not yet wired into the live
-monitoring loop.
+Current runtime note: the shipped path is Datadog-first Bedrock monitoring with
+deterministic Pup fallback, release-aware Sentry follow-up for degraded
+Sentry-enabled services, optional local debug artifacts under
+`_local_observability/`, config-gated Teams delivery, and a checked-in
+`ess-harness` CLI for repeatable `live` and `degraded` validation runs.
+Log Scout and fuller multi-tool orchestration remain future work.
 
 ## How It Works
 
@@ -19,8 +20,9 @@ monitoring loop.
 2. **ESS receives** a deploy trigger with service metadata
 3. **Scheduler ticks** run repeated health checks for a configurable window
 4. **Bedrock tool loop** calls Pup-backed Datadog tools and can deepen within a cycle
-5. **If the LLM path fails**, deterministic Datadog triage still preserves the monitoring window
-6. **If Teams is enabled**, ESS posts warning, critical, and summary notifications
+5. **If Datadog degrades**, ESS performs release-aware Sentry follow-up for the affected Sentry-enabled services
+6. **If the LLM path fails**, deterministic Datadog triage still preserves the monitoring window
+7. **If Teams is enabled**, ESS posts warning, critical, and summary notifications
 
 ESS does **not** remediate. It watches, investigates, and reports.
 
@@ -41,10 +43,31 @@ ESS does **not** remediate. It watches, investigates, and reports.
 ## Current Runtime
 
 - Deploy triggers, scheduler-driven monitoring windows, session APIs, and the Datadog Pup tool layer are live.
+- The health-check runtime is Datadog-first and now adds release-aware Sentry follow-up using project details, release details, new release issue groups, and top issue details.
 - Bedrock auth uses native `AWS_BEARER_TOKEN_BEDROCK` support through botocore; ESS no longer decodes bearer tokens into raw AWS key/secret pairs.
 - The current agent runtime uses Claude Sonnet 4.6 for both triage and investigation turns.
 - When `ESS_DEBUG_TRACE_ENABLED=true`, ESS writes session-scoped traces and shared debug logs under `_local_observability/`.
-- Sentry, Log Scout, and Teams retry/backoff remain future work.
+- The `ess-harness` CLI supports `live` runs against an existing local ESS instance and `degraded` runs that force the Datadog-to-Sentry path with a temporary local server.
+- Log Scout, broader Bedrock-level orchestration, and Teams retry/backoff remain future work.
+
+## Harness Tooling
+
+Use the checked-in harness when you want a repeatable local validation path
+without hand-driving curl calls and polling.
+
+```bash
+uv run ess-harness
+
+uv run ess-harness live \
+  --trigger docs/examples/triggers/example-service-e2e.json
+
+uv run ess-harness degraded \
+  --trigger _local_observability/triggers/pason-well-service-qa-degraded-e2e.json
+```
+
+- `live` posts a trigger to an already running ESS instance and waits for the session to finish.
+- `degraded` starts a temporary local ESS server and injects deterministic degraded Datadog responses while keeping Bedrock and Sentry live.
+- Both commands write status and summary artifacts under `_local_observability/`.
 
 ## Quick Start
 
@@ -72,7 +95,8 @@ See [docs/guides/GETTING_STARTED.md](docs/guides/GETTING_STARTED.md) for full se
 - [Architecture](docs/context/ARCHITECTURE.md) — system design
 - [Configuration](docs/context/CONFIGURATION.md) — env vars reference
 - [Getting Started](docs/guides/GETTING_STARTED.md) — setup guide
-- [Development](docs/guides/DEVELOPMENT.md) — commands and workflows
+- [Development](docs/guides/DEVELOPMENT.md) — commands, workflows, and harness usage
+- [Trigger End-to-End Datadog Pup Integration](docs/guides/TRIGGER_END_TO_END_DATADOG_PUP_INTEGRATION.md) — smoke runs, longer-window validation, and harness workflows
 
 ## License
 

@@ -52,6 +52,7 @@ class DeploymentInfo(BaseModel):
     gitlab_pipeline_id: str = Field(..., min_length=1)
     gitlab_project: str = Field(..., min_length=1)
     commit_sha: str = Field(..., min_length=7, max_length=40)
+    release_version: str | None = Field(default=None, min_length=1)
     deployed_by: str = Field(..., min_length=1)
     deployed_at: datetime
     environment: Environment
@@ -63,6 +64,14 @@ class DeploymentInfo(BaseModel):
         if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
             raise ValueError(f"commit_sha must be a hex string (7-40 chars), got {v!r}")
         return v.lower()
+
+    @field_validator("release_version")
+    @classmethod
+    def _validate_release_version(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
     @field_validator("regions", mode="before")
     @classmethod
@@ -76,6 +85,7 @@ class ServiceTarget(BaseModel):
     name: str = Field(..., min_length=1, description="Log service name (e.g. 'hub-ca-auth')")
     datadog_service_name: str = Field(..., min_length=1)
     sentry_project: str | None = None
+    sentry_project_id: int | None = Field(default=None, ge=1)
     sentry_dsn: str | None = None
     infrastructure: Infrastructure = Infrastructure.K8S
     # Which ESS Log Scout agent to query for this service's logs.
@@ -97,6 +107,14 @@ class ServiceTarget(BaseModel):
         if isinstance(v, str):
             return v.strip().lower().replace("_", "-").replace(" ", "-")
         return v
+
+    @model_validator(mode="after")
+    def _validate_sentry_fields(self) -> ServiceTarget:
+        if self.sentry_project is None and self.sentry_project_id is not None:
+            raise ValueError("sentry_project_id requires sentry_project")
+        if self.sentry_project is not None and self.sentry_project_id is None:
+            raise ValueError("sentry_project_id is required when sentry_project is set")
+        return self
 
 
 class MonitoringConfig(BaseModel):
@@ -148,6 +166,15 @@ class DeployTrigger(BaseModel):
         if not v:
             raise ValueError("At least one service must be provided")
         return v
+
+    @model_validator(mode="after")
+    def _validate_release_version_for_sentry(self) -> DeployTrigger:
+        has_sentry_service = any(service.sentry_project is not None for service in self.services)
+        if has_sentry_service and not self.deployment.release_version:
+            raise ValueError(
+                "deployment.release_version is required when any service has a sentry_project"
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

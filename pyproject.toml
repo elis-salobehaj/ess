@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ess"
 version = "0.1.0"
@@ -12,10 +16,12 @@ dependencies = [
     "aiohttp>=3.11",
     "boto3>=1.38",
     "structlog>=25.1",
+    "typer==0.24.1",
 ]
 
 [project.scripts]
 ess = "src.main:run"
+ess-harness = "src.harness_cli:main"
 
 [dependency-groups]
 dev = [
@@ -27,6 +33,10 @@ dev = [
 
 [tool.uv]
 package = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

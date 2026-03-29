@@ -16,18 +16,20 @@
 
 Each scheduler tick runs one health-check cycle across all services:
 
-### Current Runtime Path (Datadog-only)
+### Current Runtime Path (Datadog-first with release-aware Sentry follow-up)
 
 For each scheduler tick:
 
 1. ESS builds a Datadog-specific Bedrock system prompt and user prompt from the deploy context
 2. Bedrock authenticates through botocore's native `AWS_BEARER_TOKEN_BEDROCK` support and can call Datadog tools through the D3 tool layer (`DATADOG_TOOL_CONFIG`)
 3. Tool calls are dispatched to `PupTool` and normalised into `ToolResult`
-4. The current runtime model is Sonnet 4.6 for both triage and deeper investigation turns, so the same cycle can deepen after the initial triage tool pass
-5. When debug tracing is enabled, ESS records prompts, tool uses, tool results, fallback events, notification attempts/outcomes, and cycle completion to the local JSONL sink, writes a companion Markdown digest, and routes structlog output to `_local_observability/ess-debug-logs.log`
-6. The resulting findings are stored on the in-memory monitoring session
-7. After each successful cycle, ESS evaluates the minimal unattended policy: immediate `CRITICAL`, second consecutive `WARNING`, otherwise no Teams delivery
-8. If the Bedrock path fails or returns no tool calls, ESS falls back to deterministic Datadog triage for that cycle
+4. If Datadog findings remain healthy, ESS skips Sentry for that cycle
+5. If Datadog indicates a warning or critical symptom for a Sentry-enabled service, ESS fetches Sentry project details, release details, new release issue groups, and top issue details for that service
+6. The current runtime model is Sonnet 4.6 for both triage and deeper investigation turns, so the same cycle can deepen after the initial Datadog triage tool pass
+7. When debug tracing is enabled, ESS records prompts, tool uses, tool results, fallback events, notification attempts/outcomes, Sentry follow-up calls, and cycle completion to the local JSONL sink, writes a companion Markdown digest, and routes structlog output to `_local_observability/ess-debug-logs.log`
+8. The resulting findings are stored on the in-memory monitoring session
+9. After each successful cycle, ESS evaluates the minimal unattended policy: immediate `CRITICAL`, second consecutive `WARNING`, otherwise no Teams delivery
+10. If the Bedrock path fails or returns no tool calls, ESS falls back to deterministic Datadog triage for that cycle and still runs Sentry follow-up when the fallback Datadog results are degraded
 
 ### Target Triage (full multi-tool design)
 
@@ -35,16 +37,18 @@ For each service in the trigger:
 1. Check Datadog monitors → any alerting/warning?
 2. Search Datadog error logs → new errors since last check?
 3. Get APM stats → latency/error-rate regression?
-4. Query Sentry issues → new unresolved issues since deploy?
-5. Search logs via Log Scout → error patterns in raw logs?
+4. If Datadog is degraded, fetch Sentry release details for `deployment.release_version`
+5. Query Sentry new release issue groups using `effective_since = max(deployed_at, release.dateCreated)`
+6. Search logs via Log Scout → error patterns in raw logs?
 
 ### Investigation (runs if triage finds anomalies)
 
-1. Get Sentry issue details (stack trace, affected users)
-2. Search logs for specific error patterns
-3. Check APM per-operation breakdown (slow endpoints)
-4. Check infrastructure health (host CPU, memory)
-5. Correlate: did issues start at deploy time?
+1. Optionally validate Sentry project mapping if the deploy context is suspect
+2. Get Sentry issue details (stack trace, affected users)
+3. Search logs for specific error patterns
+4. Check APM per-operation breakdown (slow endpoints)
+5. Check infrastructure health (host CPU, memory)
+6. Correlate: did issues start after the effective release start?
 
 ### Report
 

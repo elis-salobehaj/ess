@@ -59,11 +59,12 @@ Each event includes a trace ID, timestamp, optional cycle number, optional paren
 
 The companion digest file is intentionally lower-noise. It keeps the high-signal milestones only: cycle starts, Bedrock request/response summaries, fallback reasons, tool-result summaries, notification outcomes, cycle findings, and the final session summary.
 
-Example debug artifacts for session `ess-6141e715`:
+Checked-in sample trace artifact:
 
-- `_local_observability/agent_trace_ess-6141e715.jsonl`
-- `_local_observability/agent_trace_digest_ess-6141e715.md`
-- `_local_observability/ess-debug-logs.log`
+- `docs/examples/triggers/example-service-qa-15m-anonymized-trace.jsonl`
+
+Live local debug artifacts remain under `_local_observability/`, including the
+session-scoped JSONL trace, digest, and shared debug log.
 
 ## API Surface During the Monitoring Window
 

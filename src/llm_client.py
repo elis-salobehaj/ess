@@ -65,9 +65,7 @@ class BedrockClient:
                 model=self._model_id,
                 region=self._config.aws_bedrock_region,
                 auth_mode=(
-                    "native_bearer"
-                    if self._config.aws_bearer_token_bedrock
-                    else "default_chain"
+                    "native_bearer" if self._config.aws_bearer_token_bedrock else "default_chain"
                 ),
                 bearer_token_present=bool(self._config.aws_bearer_token_bedrock),
             )

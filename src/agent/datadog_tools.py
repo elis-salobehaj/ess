@@ -130,9 +130,7 @@ async def _run_incidents(pup_tool: PupTool, params: _DatadogToolInput) -> PupRes
     return await pup_tool.get_recent_incidents()
 
 
-async def _run_infrastructure_health(
-    pup_tool: PupTool, params: _DatadogToolInput
-) -> PupResult:
+async def _run_infrastructure_health(pup_tool: PupTool, params: _DatadogToolInput) -> PupResult:
     assert isinstance(params, InfrastructureHealthInput)
     return await pup_tool.get_infrastructure_health(params.service)
 

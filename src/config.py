@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -50,6 +51,11 @@ class ESSConfig(BaseSettings):
     sentry_auth_token: str
     sentry_host: str = "sentry.example.com"
     sentry_org: str = "example"
+    sentry_timeout_seconds: int = 30
+    sentry_max_concurrent: int = 5
+    sentry_rate_limit_retries: int = 3
+    sentry_retry_default_seconds: int = 2
+    sentry_circuit_breaker_threshold: int = 3
 
     # -------------------------------------------------------------------------
     # Log Scout (remote syslog-side search agent)
@@ -121,6 +127,15 @@ class ESSConfig(BaseSettings):
             env["AWS_EC2_METADATA_DISABLED"] = "true"
 
         return env
+
+    def sentry_base_url(self) -> str:
+        """Return the normalised Sentry API base URL."""
+        host = self.sentry_host.strip().rstrip("/")
+        parsed = urlparse(host)
+
+        base = host if parsed.scheme else f"https://{host}"
+
+        return f"{base}/api/0"
 
     def pup_subprocess_environment(self) -> dict[str, str]:
         """Return the full environment for Pup subprocess execution."""

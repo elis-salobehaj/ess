@@ -1,8 +1,9 @@
-"""Datadog-backed health-check agent.
+"""Datadog-first health-check agent.
 
 This is the first real agent loop wired into ESS. It uses Bedrock tool-calling
-with the Datadog D3 tool layer when available, and falls back to deterministic
-Pup triage so monitoring still produces a usable result if the LLM path fails.
+with the Datadog D3 tool layer when available, falls back to deterministic Pup
+triage when the LLM path fails, and runs release-aware Sentry follow-up only
+after Datadog indicates a deploy symptom worth investigating.
 """
 
 from __future__ import annotations
@@ -29,8 +30,15 @@ from src.models import (
     ToolResult,
 )
 from src.scheduler import MonitoringSession
-from src.tools.normalise import pup_to_tool_result
+from src.tools.normalise import (
+    pup_to_tool_result,
+    sentry_issue_detail_to_tool_result,
+    sentry_new_release_issues_to_tool_result,
+    sentry_project_details_to_tool_result,
+    sentry_release_details_to_tool_result,
+)
 from src.tools.pup_tool import PupTool
+from src.tools.sentry_tool import SentryIssue, SentryTool
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)  # type: ignore[assignment]
 
@@ -45,11 +53,13 @@ class DatadogHealthCheckAgent:
         bedrock_client: BedrockClient,
         pup_tool: PupTool,
         *,
+        sentry_tool: SentryTool | None = None,
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
         trace_recorder: AgentTraceRecorder | None = None,
     ) -> None:
         self._bedrock_client = bedrock_client
         self._pup_tool = pup_tool
+        self._sentry_tool = sentry_tool
         self._max_iterations = max_iterations
         self._trace_recorder = trace_recorder
 
@@ -65,6 +75,7 @@ class DatadogHealthCheckAgent:
                 "environment": session.deploy.deployment.environment.value,
                 "regions": session.deploy.deployment.regions,
                 "commit_sha": session.deploy.deployment.commit_sha,
+                "release_version": session.deploy.deployment.release_version,
             },
         )
 
@@ -91,6 +102,12 @@ class DatadogHealthCheckAgent:
                 reason=str(exc),
                 parent_event_id=cycle_event.event_id if cycle_event else None,
             )
+
+        result = await self._augment_with_sentry(
+            session,
+            result,
+            parent_event_id=cycle_event.event_id if cycle_event else None,
+        )
 
         await self._trace(
             "cycle.completed",
@@ -177,7 +194,9 @@ class DatadogHealthCheckAgent:
                         parent_event_id=(
                             tool_use_event.event_id
                             if tool_use_event
-                            else response_event.event_id if response_event else parent_event_id
+                            else response_event.event_id
+                            if response_event
+                            else parent_event_id
                         ),
                         attributes={
                             "iteration": iteration,
@@ -304,6 +323,233 @@ class DatadogHealthCheckAgent:
             raw_tool_outputs=raw_tool_outputs,
         )
 
+    async def _augment_with_sentry(
+        self,
+        session: MonitoringSession,
+        result: HealthCheckResult,
+        *,
+        parent_event_id: str | None,
+    ) -> HealthCheckResult:
+        if self._sentry_tool is None:
+            await self._trace(
+                "sentry.skipped",
+                session,
+                parent_event_id=parent_event_id,
+                attributes={"reason": "tool_unconfigured"},
+            )
+            return result
+
+        services = self._services_requiring_sentry(session, result)
+        if not services:
+            await self._trace(
+                "sentry.skipped",
+                session,
+                parent_event_id=parent_event_id,
+                attributes={"reason": "datadog_healthy_or_not_sentry_enabled"},
+            )
+            return result
+
+        findings = list(result.findings)
+        raw_tool_outputs = dict(result.raw_tool_outputs)
+        overall_severity = result.overall_severity
+        output_index = len(raw_tool_outputs)
+
+        for service in services:
+            sentry_results = await self._run_sentry_investigation_for_service(
+                session,
+                service,
+                parent_event_id=parent_event_id,
+            )
+            for tool_result in sentry_results:
+                output_index += 1
+                finding = self._tool_result_to_finding(service.name, tool_result)
+                findings.append(finding)
+                raw_tool_outputs[f"{service.name}:{tool_result.tool}:{output_index}"] = {
+                    "success": tool_result.success,
+                    "summary": tool_result.summary,
+                    "error": tool_result.error,
+                    "data": tool_result.data,
+                    "raw": tool_result.raw,
+                }
+                if finding.severity in (HealthSeverity.WARNING, HealthSeverity.CRITICAL):
+                    overall_severity = self._max_severity(overall_severity, finding.severity)
+
+        return HealthCheckResult(
+            job_id=result.job_id,
+            cycle_number=result.cycle_number,
+            checked_at=result.checked_at,
+            overall_severity=overall_severity,
+            findings=findings,
+            services_checked=result.services_checked,
+            raw_tool_outputs=raw_tool_outputs,
+        )
+
+    async def _run_sentry_investigation_for_service(
+        self,
+        session: MonitoringSession,
+        service: ServiceTarget,
+        *,
+        parent_event_id: str | None,
+    ) -> list[ToolResult]:
+        if (
+            self._sentry_tool is None
+            or service.sentry_project is None
+            or service.sentry_project_id is None
+            or session.deploy.deployment.release_version is None
+        ):
+            return []
+
+        results: list[ToolResult] = []
+        project_result, project_tool_result = await self._run_sentry_call(
+            session,
+            parent_event_id=parent_event_id,
+            tool_name="sentry_project_details",
+            tool_input={"project_slug": service.sentry_project},
+            invoke=lambda: self._sentry_tool.get_project_details(service.sentry_project),
+            normalise=sentry_project_details_to_tool_result,
+        )
+        results.append(project_tool_result)
+
+        release_version = session.deploy.deployment.release_version
+        release_result, release_tool_result = await self._run_sentry_call(
+            session,
+            parent_event_id=parent_event_id,
+            tool_name="sentry_release_details",
+            tool_input={"release_version": release_version},
+            invoke=lambda: self._sentry_tool.get_release_details(release_version),
+            normalise=sentry_release_details_to_tool_result,
+        )
+        results.append(release_tool_result)
+
+        if not release_result.success or release_result.data is None:
+            return results
+
+        effective_since = max(
+            session.deploy.deployment.deployed_at,
+            release_result.data.date_created,
+        )
+
+        issues_result, issues_tool_result = await self._run_sentry_call(
+            session,
+            parent_event_id=parent_event_id,
+            tool_name="sentry_new_release_issues",
+            tool_input={
+                "project": service.sentry_project_id,
+                "environment": session.deploy.deployment.environment.value,
+                "release_version": release_version,
+                "effective_since": effective_since.isoformat(),
+                "per_page": 20,
+            },
+            invoke=lambda: self._sentry_tool.query_new_release_issues(
+                service.sentry_project_id,
+                session.deploy.deployment.environment.value,
+                release_version,
+                effective_since,
+                20,
+            ),
+            normalise=sentry_new_release_issues_to_tool_result,
+        )
+        results.append(issues_tool_result)
+
+        if not issues_result.success or not issues_result.data:
+            return results
+
+        for issue in self._top_issue_candidates(issues_result.data)[:3]:
+            _detail_result, detail_tool_result = await self._run_sentry_call(
+                session,
+                parent_event_id=parent_event_id,
+                tool_name="sentry_issue_details",
+                tool_input={"issue_id": issue.id},
+                invoke=lambda issue_id=issue.id: self._sentry_tool.get_issue_details(issue_id),
+                normalise=sentry_issue_detail_to_tool_result,
+            )
+            results.append(detail_tool_result)
+
+        return results
+
+    async def _run_sentry_call(
+        self,
+        session: MonitoringSession,
+        *,
+        parent_event_id: str | None,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        invoke: Any,
+        normalise: Any,
+    ) -> tuple[Any, ToolResult]:
+        tool_use_event = await self._trace(
+            "tool.use",
+            session,
+            parent_event_id=parent_event_id,
+            attributes={
+                "execution_path": "sentry_follow_up",
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+            },
+        )
+        raw_result = await invoke()
+        tool_result = normalise(raw_result)
+        await self._trace(
+            "tool.result",
+            session,
+            parent_event_id=(tool_use_event.event_id if tool_use_event else parent_event_id),
+            attributes={
+                "execution_path": "sentry_follow_up",
+                "tool": tool_result.tool,
+                "success": tool_result.success,
+                "summary": tool_result.summary,
+                "error": tool_result.error,
+                "duration_ms": tool_result.duration_ms,
+                "data": tool_result.data,
+                "raw": tool_result.raw,
+            },
+        )
+        return raw_result, tool_result
+
+    def _services_requiring_sentry(
+        self,
+        session: MonitoringSession,
+        result: HealthCheckResult,
+    ) -> list[ServiceTarget]:
+        sentry_enabled = {
+            service.name: service
+            for service in session.deploy.services
+            if service.sentry_project and service.sentry_project_id is not None
+        }
+        if not sentry_enabled:
+            return []
+
+        degraded_service_names = [
+            service.name
+            for service in session.deploy.services
+            if service.name in sentry_enabled
+            and any(
+                finding.tool.startswith("datadog.")
+                and finding.severity in (HealthSeverity.WARNING, HealthSeverity.CRITICAL)
+                and finding.summary.startswith(f"{service.name}: ")
+                for finding in result.findings
+            )
+        ]
+
+        if not degraded_service_names and result.overall_severity in (
+            HealthSeverity.WARNING,
+            HealthSeverity.CRITICAL,
+        ):
+            degraded_service_names = list(sentry_enabled.keys())
+
+        return [sentry_enabled[name] for name in degraded_service_names]
+
+    @staticmethod
+    def _top_issue_candidates(issues: list[SentryIssue]) -> list[SentryIssue]:
+        return sorted(
+            issues,
+            key=lambda issue: (
+                issue.count,
+                issue.first_seen or datetime.min.replace(tzinfo=UTC),
+            ),
+            reverse=True,
+        )
+
     async def _trace(
         self,
         event_type: str,
@@ -386,6 +632,7 @@ class DatadogHealthCheckAgent:
             f"Environment: {deploy.environment.value}\n"
             f"Regions: {', '.join(deploy.regions) if deploy.regions else 'none'}\n"
             f"Commit: {deploy.commit_sha}\n"
+            f"Release: {deploy.release_version or 'none'}\n"
             f"Deployed at: {deploy.deployed_at.isoformat()}\n"
             f"Services:\n" + "\n".join(service_lines) + previous_summary + "\n"
             "Use Datadog tools to determine whether the deployment is healthy right now."
@@ -493,6 +740,16 @@ class DatadogHealthCheckAgent:
                 if DatadogHealthCheckAgent._estimate_collection_size(tool_result.data) > 0
                 else HealthSeverity.HEALTHY
             )
+
+        if tool_result.tool == "sentry.new_release_issues":
+            return (
+                HealthSeverity.WARNING
+                if DatadogHealthCheckAgent._estimate_collection_size(tool_result.data) > 0
+                else HealthSeverity.HEALTHY
+            )
+
+        if tool_result.tool == "sentry.issue_detail":
+            return HealthSeverity.WARNING
 
         if tool_result.tool == "datadog.infrastructure_health":
             if any(token in payload for token in ("critical", "unhealthy", "down")):

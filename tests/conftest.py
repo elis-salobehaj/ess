@@ -47,6 +47,7 @@ def valid_deploy_payload() -> dict:
             "gitlab_pipeline_id": "99999",
             "gitlab_project": "group/repo",
             "commit_sha": "abc1234def5678",
+            "release_version": "2026.03.22-prod.1",
             "deployed_by": "jane.doe",
             "deployed_at": "2026-03-22T14:30:00Z",
             "environment": "production",
@@ -57,6 +58,7 @@ def valid_deploy_payload() -> dict:
                 "name": "hub-ca-auth",
                 "datadog_service_name": "example-auth-service",
                 "sentry_project": "auth-service",
+                "sentry_project_id": 47,
                 "infrastructure": "k8s",
             }
         ],

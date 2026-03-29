@@ -63,6 +63,12 @@ class TestDeploymentInfo:
         d = DeploymentInfo.model_validate(b)
         assert d.regions == ["ca", "us"]
 
+    def test_release_version_is_preserved_when_present(self) -> None:
+        b = self._base()
+        b["release_version"] = " 2026.03.24-qa.1 "
+        d = DeploymentInfo.model_validate(b)
+        assert d.release_version == "2026.03.24-qa.1"
+
 
 class TestServiceTarget:
     def test_valid_service(self) -> None:
@@ -90,6 +96,38 @@ class TestServiceTarget:
                     "sentry_dsn": "http://insecure.example.com",
                 }
             )
+
+    def test_sentry_project_requires_project_id(self) -> None:
+        with pytest.raises(ValidationError):
+            ServiceTarget.model_validate(
+                {
+                    "name": "svc",
+                    "datadog_service_name": "svc-dd",
+                    "sentry_project": "svc-sentry",
+                }
+            )
+
+    def test_sentry_project_id_requires_project_slug(self) -> None:
+        with pytest.raises(ValidationError):
+            ServiceTarget.model_validate(
+                {
+                    "name": "svc",
+                    "datadog_service_name": "svc-dd",
+                    "sentry_project_id": 47,
+                }
+            )
+
+    def test_sentry_project_and_project_id_are_valid_together(self) -> None:
+        s = ServiceTarget.model_validate(
+            {
+                "name": "svc",
+                "datadog_service_name": "svc-dd",
+                "sentry_project": "svc-sentry",
+                "sentry_project_id": 47,
+            }
+        )
+        assert s.sentry_project == "svc-sentry"
+        assert s.sentry_project_id == 47
 
 
 class TestMonitoringConfig:
@@ -150,6 +188,36 @@ class TestDeployTrigger:
         b["extra_context"] = {"ticket": "ESS-42", "release_notes": "..."}
         t = DeployTrigger.model_validate(b)
         assert t.extra_context["ticket"] == "ESS-42"
+
+    def test_sentry_enabled_trigger_requires_release_version(self) -> None:
+        b = self._base()
+        b["services"] = [
+            {
+                "name": "svc-a",
+                "datadog_service_name": "svc-a-dd",
+                "sentry_project": "svc-a",
+                "sentry_project_id": 47,
+            }
+        ]
+
+        with pytest.raises(ValidationError):
+            DeployTrigger.model_validate(b)
+
+    def test_sentry_enabled_trigger_accepts_release_version(self) -> None:
+        b = self._base()
+        b["deployment"]["release_version"] = "2026.03.24-qa.1"
+        b["services"] = [
+            {
+                "name": "svc-a",
+                "datadog_service_name": "svc-a-dd",
+                "sentry_project": "svc-a",
+                "sentry_project_id": 47,
+            }
+        ]
+
+        t = DeployTrigger.model_validate(b)
+        assert t.deployment.release_version == "2026.03.24-qa.1"
+        assert t.services[0].sentry_project_id == 47
 
 
 class TestToolResult:

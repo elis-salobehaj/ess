@@ -78,7 +78,8 @@ curl -s -X POST http://localhost:8080/api/v1/deploy \
     "deployment": {
       "gitlab_pipeline_id": "test-123",
       "gitlab_project": "test/repo",
-      "commit_sha": "abc123",
+      "commit_sha": "abc1234",
+      "release_version": "2026.03.29-prod.1",
       "deployed_by": "developer",
       "deployed_at": "2026-03-22T14:30:00Z",
       "environment": "production",
@@ -89,6 +90,7 @@ curl -s -X POST http://localhost:8080/api/v1/deploy \
         "name": "test-service",
         "datadog_service_name": "test-svc",
         "sentry_project": "test-project",
+        "sentry_project_id": 47,
         "infrastructure": "k8s"
       }
     ],
@@ -99,7 +101,10 @@ curl -s -X POST http://localhost:8080/api/v1/deploy \
   }'
 ```
 
-For a realistic local smoke run against the current Datadog-only runtime, use the checked-in trigger fixture instead:
+If any service includes `sentry_project`, the payload must also include both
+`deployment.release_version` and `services[].sentry_project_id`.
+
+For a realistic local smoke run against the current Datadog-first runtime path, use the checked-in trigger fixture instead:
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \

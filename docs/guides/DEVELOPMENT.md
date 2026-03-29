@@ -9,6 +9,9 @@ uv sync
 # Run the service (development)
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload
 
+# Harness CLI help
+uv run ess-harness
+
 # Run all tests
 uv run pytest
 
@@ -41,6 +44,40 @@ tail -f _local_observability/ess-debug-logs.log
 tail -f _local_observability/agent_trace_digest_<job_id>.md
 ```
 
+## Harness CLI
+
+Use the checked-in harness CLI when you need a repeatable local run against a
+trigger file.
+
+```bash
+uv run ess-harness live \
+  --trigger docs/examples/triggers/example-service-e2e.json
+
+uv run ess-harness live \
+  --trigger _local_observability/triggers/pason-well-service-qa-10m.json
+
+uv run ess-harness degraded \
+  --trigger _local_observability/triggers/pason-well-service-qa-degraded-e2e.json
+```
+
+What it does:
+
+- `live` posts the trigger to an already running ESS instance and polls the real runtime path to completion
+- `live` fails fast when ESS is not running and prints the helper command to start ESS in development mode
+- `degraded` starts a temporary local ESS server on `127.0.0.1:8011` and injects deterministic degraded Datadog responses
+- Harness timeouts default to the trigger window plus a small buffer unless you pass `--timeout-seconds`
+- Both commands write final status and summary artifacts under `_local_observability/`
+- `uv run ess-harness ...` is the only supported harness entry point
+
+The CLI requires `--trigger`. The normal `live` command also prints a helper
+command when ESS is not already running locally:
+
+```text
+ESS is not running at http://127.0.0.1:8080.
+Start ESS in development mode with:
+uv run uvicorn src.main:app --host 127.0.0.1 --port 8080 --reload
+```
+
 ## Project Structure
 
 ```
@@ -53,6 +90,7 @@ ess/
 ├── src/
 │   ├── __init__.py
 │   ├── main.py            # FastAPI app entry point
+│   ├── harness_cli.py     # Typer-based development harness CLI
 │   ├── config.py          # pydantic-settings config loader
 │   ├── models.py          # Deploy event schema, health check models
 │   ├── scheduler.py       # APScheduler job management
@@ -78,6 +116,8 @@ ess/
   Datadog/Sentry/Bedrock credentials. Run with `uv run pytest -m integration`.
 - **End-to-end tests**: full deploy trigger → health check → notification flow
   with mocked external services.
+- **CLI harness validation**: run `uv run ess-harness live --trigger ...` for the production-shaped path,
+  or `uv run ess-harness degraded --trigger ...` for the forced Datadog-to-Sentry path.
 
 ## Logging
 

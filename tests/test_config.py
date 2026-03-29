@@ -28,6 +28,14 @@ class TestConfigDefaults:
         assert cfg.pup_max_concurrent == 10
         assert cfg.pup_default_timeout == 60
 
+    def test_default_sentry_runtime_values(self) -> None:
+        cfg = ESSConfig(_env_file=None, dd_api_key="k", dd_app_key="a", sentry_auth_token="s")
+        assert cfg.sentry_timeout_seconds == 30
+        assert cfg.sentry_max_concurrent == 5
+        assert cfg.sentry_rate_limit_retries == 3
+        assert cfg.sentry_retry_default_seconds == 2
+        assert cfg.sentry_circuit_breaker_threshold == 3
+
     def test_default_teams_webhook_is_none(self) -> None:
         cfg = ESSConfig(_env_file=None, dd_api_key="k", dd_app_key="a", sentry_auth_token="s")
         assert cfg.default_teams_webhook_url is None
@@ -137,6 +145,28 @@ class TestBedrockBearerToken:
         assert env["DD_APP_KEY"] == "a"
         assert env["DD_SITE"] == "datadoghq.eu"
         assert env["FORCE_AGENT_MODE"] == "1"
+
+    def test_sentry_base_url_defaults_to_https(self) -> None:
+        cfg = ESSConfig(
+            _env_file=None,
+            sentry_host="sentry.internal.example",
+            dd_api_key="k",
+            dd_app_key="a",
+            sentry_auth_token="s",
+        )
+
+        assert cfg.sentry_base_url() == "https://sentry.internal.example/api/0"
+
+    def test_sentry_base_url_preserves_explicit_scheme(self) -> None:
+        cfg = ESSConfig(
+            _env_file=None,
+            sentry_host="https://sentry.internal.example/",
+            dd_api_key="k",
+            dd_app_key="a",
+            sentry_auth_token="s",
+        )
+
+        assert cfg.sentry_base_url() == "https://sentry.internal.example/api/0"
 
     def test_bearer_token_does_not_set_standard_aws_credentials(
         self,

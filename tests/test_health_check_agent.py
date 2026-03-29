@@ -15,6 +15,13 @@ from src.agent.trace import AgentTraceRecorder
 from src.models import DeployTrigger, HealthSeverity
 from src.scheduler import MonitoringSession
 from src.tools.pup_tool import PupResult
+from src.tools.sentry_tool import (
+    SentryIssue,
+    SentryIssueDetail,
+    SentryProjectDetails,
+    SentryReleaseDetails,
+    SentryResult,
+)
 
 _EXAMPLE_TRIGGER_PATH = (
     Path(__file__).resolve().parents[1]
@@ -79,11 +86,113 @@ def _mock_pup_tool() -> SimpleNamespace:
     )
 
 
+def _ok_project_result() -> SentryResult[SentryProjectDetails]:
+    return SentryResult(
+        operation="get_project_details",
+        request_path="/projects/example/example-service/",
+        status_code=200,
+        data=SentryProjectDetails.model_validate(
+            {
+                "id": 47,
+                "slug": "example-service",
+                "name": "Example Service",
+                "platform": "java",
+                "features": ["issue-stream"],
+            }
+        ),
+        error=None,
+        duration_ms=12,
+        raw={"url": "https://sentry.example.com/api/0/projects/example/example-service/"},
+    )
+
+
+def _ok_release_result() -> SentryResult[SentryReleaseDetails]:
+    return SentryResult(
+        operation="get_release_details",
+        request_path="/organizations/example/releases/2026.03.24-qa.1/",
+        status_code=200,
+        data=SentryReleaseDetails.model_validate(
+            {
+                "version": "2026.03.24-qa.1",
+                "dateCreated": "2026-03-24T14:00:00Z",
+                "lastEvent": "2026-03-24T14:10:00Z",
+                "newGroups": 1,
+                "projects": [{"id": 47, "slug": "example-service"}],
+            }
+        ),
+        error=None,
+        duration_ms=15,
+        raw={
+            "url": "https://sentry.example.com/api/0/organizations/example/releases/2026.03.24-qa.1/"
+        },
+    )
+
+
+def _ok_new_release_issues() -> SentryResult[list[SentryIssue]]:
+    return SentryResult(
+        operation="query_new_release_issues",
+        request_path="/organizations/example/issues/",
+        status_code=200,
+        data=[
+            SentryIssue.model_validate(
+                {
+                    "id": "1001",
+                    "title": "Regression after deploy",
+                    "count": "4",
+                    "userCount": "2",
+                    "firstSeen": "2026-03-24T14:06:00Z",
+                    "level": "error",
+                }
+            )
+        ],
+        error=None,
+        duration_ms=18,
+        raw={
+            "params": {
+                "query": (
+                    'release:"2026.03.24-qa.1" firstSeen:>=2026-03-24T14:05:00Z '
+                    "is:unresolved issue.category:error"
+                )
+            }
+        },
+    )
+
+
+def _ok_issue_detail() -> SentryResult[SentryIssueDetail]:
+    return SentryResult(
+        operation="get_issue_details",
+        request_path="/issues/1001/",
+        status_code=200,
+        data=SentryIssueDetail.model_validate(
+            {
+                "id": "1001",
+                "title": "Regression after deploy",
+                "count": "4",
+                "userCount": "2",
+                "latest_event": {"eventID": "evt-1", "message": "boom"},
+            }
+        ),
+        error=None,
+        duration_ms=21,
+        raw={"issue": {}, "latest_event": {}},
+    )
+
+
+def _mock_sentry_tool() -> SimpleNamespace:
+    return SimpleNamespace(
+        get_project_details=AsyncMock(return_value=_ok_project_result()),
+        get_release_details=AsyncMock(return_value=_ok_release_result()),
+        query_new_release_issues=AsyncMock(return_value=_ok_new_release_issues()),
+        get_issue_details=AsyncMock(return_value=_ok_issue_detail()),
+    )
+
+
 class TestDatadogHealthCheckAgent:
     @pytest.mark.asyncio
     async def test_runs_bedrock_tool_loop_and_returns_health_result(self) -> None:
         session = _session()
         pup_tool = _mock_pup_tool()
+        sentry_tool = _mock_sentry_tool()
         bedrock_client = _FakeBedrockClient(
             responses=[
                 {
@@ -128,7 +237,11 @@ class TestDatadogHealthCheckAgent:
             ]
         )
 
-        agent = DatadogHealthCheckAgent(bedrock_client=bedrock_client, pup_tool=pup_tool)
+        agent = DatadogHealthCheckAgent(
+            bedrock_client=bedrock_client,
+            pup_tool=pup_tool,
+            sentry_tool=sentry_tool,
+        )
         result = await agent.run_health_check(session)
 
         assert result.job_id == session.job_id
@@ -140,6 +253,78 @@ class TestDatadogHealthCheckAgent:
         assert "agent.summary" in result.raw_tool_outputs
         pup_tool.get_monitor_status.assert_awaited_once_with("example-service", "qa")
         pup_tool.search_error_logs.assert_awaited_once_with("example-service", minutes=10)
+        sentry_tool.get_project_details.assert_not_awaited()
+        sentry_tool.get_release_details.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_runs_release_aware_sentry_follow_up_when_datadog_is_degraded(self) -> None:
+        session = _session()
+        pup_tool = _mock_pup_tool()
+        pup_tool.search_error_logs = AsyncMock(
+            return_value=_ok_pup_result({"items": [{"message": "boom"}]})
+        )
+        sentry_tool = _mock_sentry_tool()
+        bedrock_client = _FakeBedrockClient(
+            responses=[
+                {
+                    "output": {
+                        "message": {
+                            "content": [
+                                {
+                                    "toolUse": {
+                                        "toolUseId": "tu-1",
+                                        "name": "datadog_error_logs",
+                                        "input": {
+                                            "service": "example-service",
+                                            "minutes_back": 10,
+                                        },
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "stopReason": "tool_use",
+                },
+                {
+                    "output": {
+                        "message": {
+                            "content": [
+                                {
+                                    "text": (
+                                        "Severity: WARNING\n"
+                                        "Recent Datadog errors detected after deploy."
+                                    )
+                                }
+                            ]
+                        }
+                    },
+                    "stopReason": "end_turn",
+                },
+            ]
+        )
+
+        agent = DatadogHealthCheckAgent(
+            bedrock_client=bedrock_client,
+            pup_tool=pup_tool,
+            sentry_tool=sentry_tool,
+        )
+        result = await agent.run_health_check(session)
+
+        assert result.overall_severity == HealthSeverity.WARNING
+        assert any(finding.tool == "sentry.project_details" for finding in result.findings)
+        assert any(finding.tool == "sentry.release_details" for finding in result.findings)
+        assert any(finding.tool == "sentry.new_release_issues" for finding in result.findings)
+        assert any(finding.tool == "sentry.issue_detail" for finding in result.findings)
+        sentry_tool.get_project_details.assert_awaited_once_with("example-service")
+        sentry_tool.get_release_details.assert_awaited_once_with("2026.03.24-qa.1")
+        sentry_tool.query_new_release_issues.assert_awaited_once_with(
+            47,
+            "qa",
+            "2026.03.24-qa.1",
+            session.deploy.deployment.deployed_at,
+            20,
+        )
+        sentry_tool.get_issue_details.assert_awaited_once_with("1001")
 
     @pytest.mark.asyncio
     async def test_falls_back_to_deterministic_triage_when_bedrock_fails(self) -> None:
@@ -165,9 +350,7 @@ class TestDatadogHealthCheckAgent:
         bedrock_client = _FakeBedrockClient(
             responses=[
                 {
-                    "output": {
-                        "message": {"content": [{"text": "I think it looks healthy."}]}
-                    },
+                    "output": {"message": {"content": [{"text": "I think it looks healthy."}]}},
                     "stopReason": "end_turn",
                 }
             ]

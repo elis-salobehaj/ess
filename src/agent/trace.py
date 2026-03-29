@@ -260,11 +260,7 @@ class AgentTraceRecorder:
                         severity = finding.get("severity", "UNKNOWN")
                         tool = finding.get("tool", "unknown")
                         summary = finding.get("summary", "")
-                        lines.append(
-                            "  - "
-                            f"{severity} {tool}: "
-                            f"{summary}"
-                        )
+                        lines.append(f"  - {severity} {tool}: {summary}")
             lines.append("")
             return "\n".join(lines)
 

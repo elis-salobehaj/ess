@@ -135,10 +135,13 @@ class TeamsPublisher:
             return await self._transport(webhook_url, payload, self._timeout_seconds)
 
         timeout = aiohttp.ClientTimeout(total=self._timeout_seconds)
-        async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
-            webhook_url,
-            json=payload,
-        ) as response:
+        async with (
+            aiohttp.ClientSession(timeout=timeout) as session,
+            session.post(
+                webhook_url,
+                json=payload,
+            ) as response,
+        ):
             return response.status, await response.text()
 
 

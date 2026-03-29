@@ -8,7 +8,7 @@ The implementation lives in `src/agent/datadog_tools.py` and provides three thin
 2. Datadog-specific system-prompt text via `build_datadog_tool_prompt_fragment()`
 3. Validated dispatch from Bedrock `toolUse` blocks to `PupTool` methods
 
-At runtime, these definitions are now consumed by `src/agent/health_check_agent.py`, which runs the first Datadog-only Bedrock tool loop for each monitoring cycle and falls back to deterministic Pup triage if the LLM path fails.
+At runtime, these definitions are now consumed by `src/agent/health_check_agent.py`, which runs the shipped Datadog-first Bedrock tool loop for each monitoring cycle, falls back to deterministic Pup triage if the LLM path fails, and then hands degraded results to the release-aware Sentry follow-up path.
 
 The live runtime currently uses Claude Sonnet 4.6 for both the initial Datadog triage turn and any deeper Datadog investigation turns within the same cycle.
 

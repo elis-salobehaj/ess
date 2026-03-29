@@ -4,7 +4,7 @@ status: active
 priority: high
 estimated_hours: 80-120
 created: 2026-03-22
-date_updated: 2026-03-28
+date_updated: 2026-03-29
 related_files:
     - src/main.py
     - src/config.py
@@ -12,17 +12,27 @@ related_files:
     - src/scheduler.py
     - src/llm_client.py
     - src/agent/health_check_agent.py
+    - src/agent/sentry_tools.py
+    - src/tools/sentry_tool.py
+    - src/tools/normalise.py
     - src/notifications/__init__.py
+    - docs/examples/triggers/example-service-e2e.json
+    - tests/test_health_check_agent.py
+    - tests/test_sentry_tool.py
+    - tests/test_sentry_tools.py
     - docs/context/ARCHITECTURE.md
     - docs/context/CONFIGURATION.md
     - docs/context/WORKFLOWS.md
     - docs/designs/technology-decisions.md
+    - docs/plans/backlog/ess-sentry-integration.md
+    - docs/guides/SENTRY_REST_INTEGRATION.md
     - config/.env.example
 tags:
     - agentic-ai
     - post-deploy
     - observability
     - datadog-pup
+    - sentry-rest
     - sentry-mcp
     - ms-teams
 completion:
@@ -42,20 +52,21 @@ completion:
     - [x] E15.5 Validate GitLab-triggered Datadog-only monitoring for 30-60 minute windows
     - [x] E15.6 Documentation — Datadog-only unattended and inspectable ship guide
     - [x] E15.7 review-plan-phase audit for the narrowed first ship
-    - "# Phase 2 — Tool Integration Layer"
+    - "# Phase 2 — Tool Integration Layer (Sentry-First)"
     - [x] E2.1 Integrate Datadog Pup CLI as subprocess tool executor
-    - [ ] E2.2 Integrate Sentry MCP server as stdio tool executor
-    - [ ] E2.3 Implement log scout HTTP adapter (remote log search)
-    - [ ] E2.4 Build unified tool-result normalisation layer
-    - [ ] E2.5 Unit tests for each tool adapter
-    - [ ] E2.6 Documentation update — tool integration guide
+    - [x] E2.2 Integrate Sentry REST adapter as the primary second signal source
+    - [x] E2.3 Extend unified tool-result normalisation for Sentry responses
+    - [x] E2.4 Unit and integration tests for the Sentry adapter and Bedrock tool layer
+    - [x] E2.5 Documentation update — Sentry-first tool integration guide
+    - [x] E2.6 Add release-aware deploy schema (`release_version`, required `sentry_project_id`) for Sentry-enabled services
+    - [x] E2.7 Implement release-details, project-details, new-release-issue Sentry queries, and default-tool cleanup
     - "# Phase 3 — Agentic AI Orchestration"
-    - [ ] E3.1 Implement agent orchestrator (LLM-driven reasoning loop)
-    - [ ] E3.2 Define system prompt and tool descriptions
-    - [ ] E3.3 Implement health-check workflow (triage → investigate → report)
+    - [ ] E3.1 Generalise the shipped Datadog agent loop into a multi-tool orchestrator
+    - [ ] E3.2 Define Sentry-aware system prompt and tool descriptions
+    - [ ] E3.3 Implement Datadog + Sentry health-check workflow (triage → investigate → report)
     - [ ] E3.4 Build escalation logic (severity thresholds, retry/deepen cycle)
-    - [ ] E3.5 Implement context-window management and summarisation
-    - [ ] E3.6 Unit and integration tests for orchestrator
+    - [ ] E3.5 Implement context-window management and summarisation for longer multi-tool runs
+    - [ ] E3.6 Unit and integration tests for the orchestrator
     - [ ] E3.7 Documentation update — orchestration design
     - "# Phase 4 — Notification & Reporting"
     - [ ] E4.1 Implement MS Teams webhook publisher
@@ -72,6 +83,10 @@ completion:
     - [ ] E5.5 End-to-end integration test with mock deploy trigger
     - [ ] E5.6 Production deployment guide
     - [ ] E5.7 Final review-plan-phase audit
+    - "# Phase 6 — Deferred Expansion Paths"
+    - [ ] E6.1 Evaluate Sentry MCP stdio transport after the release-aware REST runtime is stable
+    - [ ] E6.2 Implement an optional Sentry MCP backend behind a feature flag only if evaluation justifies it
+    - [ ] E6.3 Implement the Log Scout HTTP adapter after the Datadog plus Sentry runtime proves value
 ---
 
 # ESS — Eye of Sauron Service
@@ -84,16 +99,28 @@ completion:
 This master plan is broken into three implementable deliverables:
 
 1. **[Datadog Pup CLI Integration](../implemented/ess-datadog-pup-integration.md)** — PupTool adapter, health-check and investigation methods, Bedrock tool schemas, Docker install, circuit breaker (25-35h)
-2. **[Sentry Integration](../backlog/ess-sentry-integration.md)** — REST API client (ported from log-ai), issue/trace queries, 429 backoff, future MCP upgrade path (20-30h)
+2. **[Sentry Integration](../backlog/ess-sentry-integration.md)** — implemented release-aware REST API client plus deferred Phase S5 MCP follow-on work (20-30h)
 3. **[Log Scout: Syslog Search Agent](../backlog/ess-log-scout-syslog-agent.md)** — Standalone HTTP microservice on syslog servers, ripgrep search, ESS client adapter, per-host routing (30-40h)
 
 The **foundation** (Phase 1: trigger API, scheduler, config, Bedrock auth) and **orchestration** (Phase 3: ReAct loop, escalation, context management) remain in this master plan as they span all three tool verticals.
 
 Before the full multi-tool ESS is complete, this master plan now includes a narrowed shipping path: **Phase 1.5 — Self-Unattended and Inspectable Datadog Deliverable**. It pulls forward the minimum slices of orchestration, notification, and observability needed to ship a Datadog-only post-deploy watcher before Sentry and Log Scout are integrated.
 
+With Phase 1.5 shipped, the next implementation order is intentionally **not** “finish every remaining Phase 2 backend before touching Phase 3.” The planned sequence is:
+
+1. add **Sentry as the second production signal source** through the simpler REST adapter path
+2. extend the **existing shipped Datadog agent loop** into a Datadog + Sentry orchestrator
+3. defer **Sentry MCP** and **Log Scout** into a later Phase 6 once the REST-backed Datadog + Sentry runtime has proven value
+
+This keeps the next delivery focused on a stronger early shipping result instead of widening scope across too many unfinished integrations at once.
+
 ---
 
 ## High-Level Architecture
+
+The diagrams below show the **full ESS target architecture**. The immediate next
+implementation increment after Phase 1.5 is narrower: **Datadog + Sentry via the
+REST adapter**, with Log Scout still deferred.
 
 ```mermaid
 sequenceDiagram
@@ -102,8 +129,8 @@ sequenceDiagram
     participant SCHED as Job Scheduler
     participant AGENT as AI Orchestrator
     participant PUP as Datadog Pup CLI
-    participant SMCP as Sentry MCP / API
-    participant LOGS as Log Search (ripgrep)
+    participant SENTRY as Sentry REST API
+    participant LOGS as Log Scout HTTP
     participant TEAMS as MS Teams Webhook
 
     GL->>ESS: POST /deploy (service, env, dd_service, sentry_project, ...)
@@ -117,8 +144,10 @@ sequenceDiagram
         PUP-->>AGENT: recent error logs JSON
         AGENT->>PUP: pup apm services stats {dd_svc}
         PUP-->>AGENT: APM latency/error-rate JSON
-        AGENT->>SMCP: query_sentry_issues(project={sentry_proj})
-        SMCP-->>AGENT: recent issues JSON
+        AGENT->>SENTRY: get_release_details(release={release})
+        SENTRY-->>AGENT: release metadata JSON
+        AGENT->>SENTRY: query_new_release_issues(project_id={sentry_id}, release={release})
+        SENTRY-->>AGENT: new release error groups JSON
         AGENT->>LOGS: search_logs(service={svc}, query="error", minutes_back=10)
         LOGS-->>AGENT: raw log matches
 
@@ -145,7 +174,7 @@ graph TB
 
     subgraph "External Tool Backends"
         PUP[Datadog Pup CLI<br/>320+ commands]
-        SMCP[Sentry MCP Server<br/>stdio transport]
+        SENTRY[Sentry REST API<br/>future MCP option]
         LOGAI[Log Search<br/>ripgrep on syslog]
     end
 
@@ -154,7 +183,7 @@ graph TB
     SCHED --> ORCH
     ORCH --> TOOLS
     TOOLS --> PUP
-    TOOLS --> SMCP
+    TOOLS --> SENTRY
     TOOLS --> LOGAI
     ORCH --> NOTIFY
     NOTIFY --> TEAMS[MS Teams Channel]
@@ -173,21 +202,24 @@ reports. The agent's job is to correlate signals across observability platforms,
 understand what went wrong post-deploy, and present a clear, actionable summary
 to the engineering team.
 
-## Progress Note — 2026-03-28
+## Progress Note — 2026-03-29
 
 Current runtime state:
 
 - Trigger API, scheduler, Datadog Pup adapter, Docker packaging, and Datadog D3 tool definitions are implemented.
-- The live health-check path now uses a Datadog-only Bedrock tool loop with deterministic Pup fallback.
+- The live health-check path now uses a Datadog-first Bedrock tool loop with deterministic Pup fallback.
+- The Sentry REST adapter now includes the release-aware project-details, release-details, and new-release-issue query surface, and degraded Sentry-enabled services now trigger deterministic Sentry follow-up on the live monitoring loop.
 - A debug-gated Phase 1.5 trace seam now records observable cycle execution, notification, and completion events when enabled.
 - Session results are visible through the API, including `latest_result` on `GET /api/v1/deploy/{job_id}`.
 - Teams delivery is now config-gated on the same runtime path for repeated-warning, critical, and end-of-window notifications.
-- Sentry integration, Log Scout integration, advanced escalation, and notification retry policy remain outside the current runtime path.
+- Full Bedrock-level Datadog + Sentry orchestration, Log Scout integration, advanced escalation, and notification retry policy remain outside the current runtime path.
 - Live Datadog smoke validation now passes on the real Bedrock tool path using botocore's native bearer-token support. Re-run 15-minute and 30-minute windows both completed `HEALTHY` on the live Bedrock path; the 60-minute payload remains an optional operator-confidence run rather than a release blocker.
 
-This means ESS can already monitor a deployment window against Datadog alone, but the full multi-tool orchestrator from later phases is not complete yet.
+This means ESS can already monitor a deployment window with Datadog-first triage and release-aware Sentry corroboration, but the full multi-tool orchestrator from later phases is not complete yet.
 
-The current milestone is Phase 1.5: turning that Datadog-only monitor into a shippable first deliverable that is either:
+The next milestone is Phase 3: generalising the shipped Datadog-first runtime
+into a fuller Datadog + Sentry orchestrator while preserving the current
+inspectable and unattended delivery bar. The completed first deliverable is:
 
 - **inspectable** through the session API and structured logs, with an optional debug-gated local trace when deeper inspection is needed
 - **unattended and still debuggable** when Teams delivery is enabled via config
@@ -243,39 +275,34 @@ The `--agent` flag or `FORCE_AGENT_MODE=1` ensures machine-optimised responses.
 
 ---
 
-### Decision 2: Sentry Integration — Sentry MCP Server vs. Custom API Client vs. Port log-ai
+### Decision 2: Sentry Integration — Release-Aware REST First, MCP Later
 
-| Concern | Log-ai Custom Client | Sentry MCP Server (`@sentry/mcp-server`) | Recommendation |
+| Concern | REST adapter (ported from log-ai) | Sentry MCP Server (`@sentry/mcp-server`) | Recommendation |
 |---|---|---|---|
-| **Coverage** | 3 tools (query_issues, issue_details, search_traces) | Full Sentry API: issues, traces, events, AI-powered search, Seer | **Sentry MCP** |
-| **Self-hosted** | Works with `sentry_url` config | `--host=sentry.example.com` flag, stdio transport | **Both work** |
-| **Maintenance** | We own parsing, pagination, error mapping | Maintained by Sentry (getsentry), 606 stars, 41 contributors | **Sentry MCP** |
-| **AI features** | None | `search_events`, `search_issues` — LLM-powered natural language query translation | **Sentry MCP** |
-| **Auth** | `SENTRY_AUTH_TOKEN` in config | `SENTRY_ACCESS_TOKEN` env var + optional LLM provider for AI search | **Both** |
-| **Token efficiency** | Raw API JSON | Optimised MCP responses designed for agent consumption | **Sentry MCP** |
-| **Integration model** | Python function calls | stdio MCP server (npx), or direct HTTP to mcp.sentry.dev | **Sentry MCP** |
-| **Maturity** | Stable but limited | Production tag, active development (last commit 3 days ago) | **Sentry MCP** |
+| **Time to ship** | Lowest; fits current Python runtime and test stack | Higher; adds Node.js and stdio lifecycle work | **REST first** |
+| **Coverage needed now** | Covers the v1 release-aware ESS queries: release details, new release issue groups, issue details, and investigation-time traces | Broader API coverage and AI-powered search | **REST first** |
+| **Operational complexity** | Single async HTTP client in-process | Extra subprocess, transport, and packaging concerns | **REST first** |
+| **Self-hosted fit** | Straightforward with existing host/token config | Supported, but adds more moving parts | **REST first** |
+| **Upgrade path** | Can later sit behind the same tool interface | Strong long-term option | **MCP later** |
 
-**Verdict: Use Sentry MCP server for primary integration.**
+**Verdict: Use the Sentry REST adapter as the primary next implementation step, with Sentry MCP explicitly deferred to Phase 6.**
 
-ESS should invoke the Sentry MCP server via stdio transport (`npx @sentry/mcp-server
---access-token=TOKEN --host=sentry.example.com`) for self-hosted instances. This
-gives us maintained, agent-optimised Sentry access without owning the API client.
+The current goal is to add a second production signal source quickly and safely so
+the shipped Datadog monitor can evolve into a more valuable Datadog + Sentry
+orchestrator without waiting on every backend integration. For that reason, the
+Phase 2 priority is the simpler REST path first.
 
-For scenarios where the MCP server cannot be used (air-gapped environments, or if
-npx is unavailable), the log-ai Sentry integration code serves as a proven
-fallback that can be ported with minimal changes.
-
-**Integration approach**: ESS runs `@sentry/mcp-server` as a stdio subprocess and
-communicates via JSON-RPC MCP protocol, or alternatively wraps key Sentry REST API
-calls directly (porting the 3 existing log-ai tools) for simpler deployment.
-
-A pragmatic hybrid is recommended for Phase 2:
-1. **Primary path**: Direct Sentry REST API calls (port/reference log-ai's
-   `sentry_integration.py`) — simpler, no Node.js dependency, proven working for
-   the 3 core queries ESS needs (issues, issue details, traces).
-2. **Future upgrade**: Once ESS is stable, evaluate migrating to Sentry MCP stdio
-   transport for AI-powered search and broader coverage.
+**Integration approach**:
+1. **Primary path now**: Direct Sentry REST API calls for the release-aware v1
+    flow: project details, release details, new release issue groups, issue
+    details, and traces only for latency investigation.
+2. **Canonical query shape**: keep `release:"..." firstSeen:>=effective_since`
+    as the default because ESS must preserve deploy-time precision; the tested
+    `first-release:"..."` query is a validated alternate, not the default.
+3. **Fresh data policy**: fetch release details on every Sentry investigation
+    cycle in v1; do not add caching yet.
+4. **Future upgrade path**: once the expanded runtime is stable, evaluate Sentry
+    MCP stdio transport in Phase 6.
 
 ---
 
@@ -340,6 +367,11 @@ This is a classic ReAct loop that does not require a heavyweight framework. A
 custom implementation using direct LLM API calls (Claude via AWS Bedrock or
 Anthropic API, with OpenAI as fallback) keeps the dependency footprint minimal
 and the behaviour fully transparent.
+
+The orchestrator must preserve ESS's existing **multi-service trigger** model.
+One deploy event can contain multiple service targets; triage must still run
+across all services in the trigger, deeper investigation can focus on the
+affected subset, and the cycle result must remain aggregated by service.
 
 If the agent's reasoning needs become more complex (multi-step investigation
 graphs, parallel investigation branches, human-in-the-loop escalation), LangGraph
@@ -539,6 +571,7 @@ infrastructure (K8s vs. ECS Fargate) with different naming conventions.
         "gitlab_pipeline_id": "12345",
         "gitlab_project": "group/repo",
         "commit_sha": "abc123def",
+        "release_version": "2.4.6",
         "deployed_by": "jane.doe",
         "deployed_at": "2026-03-22T14:30:00Z",
         "environment": "production",
@@ -549,6 +582,7 @@ infrastructure (K8s vs. ECS Fargate) with different naming conventions.
             "name": "hub-ca-auth",                    # log service name
             "datadog_service_name": "example-auth-service",
             "sentry_project": "auth-service",
+            "sentry_project_id": 47,
             "sentry_dsn": "https://...",              # optional
             "infrastructure": "k8s",                   # k8s | ecs-fargate
             "log_search_host": "syslog-ca.example.com" # which log scout to call
@@ -557,6 +591,7 @@ infrastructure (K8s vs. ECS Fargate) with different naming conventions.
             "name": "hub-ca-auth-scheduler",           # sidecar scheduler
             "datadog_service_name": "example-auth-scheduler",
             "sentry_project": "auth-scheduler",
+            "sentry_project_id": 48,
             "infrastructure": "ecs-fargate",
             "log_search_host": "syslog-ca.example.com"
         }
@@ -588,8 +623,8 @@ independently. The final report aggregates per-service findings.
 #### E1.3 — Define deploy-event schema
 
 Pydantic v2 models with validation:
-- `deployment`: required block with `environment`, `gitlab_pipeline_id`, `commit_sha`
-- `services`: list of 1+ `ServiceTarget` models, each requiring `name` and `datadog_service_name`
+- `deployment`: required block with `environment`, `gitlab_pipeline_id`, `commit_sha`, and `release_version` when Sentry-enabled services are present
+- `services`: list of 1+ `ServiceTarget` models, each requiring `name` and `datadog_service_name`, plus `sentry_project_id` for Sentry-enabled services
 - `monitoring`: optional block with defaults (`window_minutes=30`, `check_interval_minutes=5`)
 - `regions`: list of region codes (e.g., `["ca", "us"]`)
 - Validate `environment` is one of known values
@@ -820,10 +855,11 @@ Run `review-plan-phase` against Phase 1.5 before considering the narrowed first 
 
 ---
 
-### Phase 2 — Tool Integration Layer
+### Phase 2 — Tool Integration Layer (Sentry-First)
 
-**Goal**: ESS can execute Datadog, Sentry, and log-search queries and normalise
-results into a format the AI orchestrator can consume.
+**Goal**: ESS can execute Datadog and Sentry queries and normalise results into a
+format the orchestrator can consume, while intentionally deferring Log Scout
+until the broader multi-tool runtime has proven value.
 
 #### E2.1 — Datadog Pup CLI adapter
 
@@ -884,66 +920,63 @@ or includes the pre-built binary in the Docker image.
 
 #### E2.2 — Sentry adapter
 
-Primary approach — direct REST API calls (ported from log-ai):
+Primary approach — direct, release-aware REST API calls:
 
 ```python
 class SentryTool:
-    """Query Sentry REST API for issues and traces."""
+    """Query self-hosted Sentry for release-aware post-deploy evidence."""
 
-    async def query_issues(self, project: str, query: str = "is:unresolved",
-                           hours_back: int = 1) -> dict: ...
+    async def get_project_details(self, project_slug: str) -> dict: ...
+
+    async def get_release_details(self, release_version: str) -> dict: ...
+
+    async def query_new_release_issues(
+        self,
+        project: str | int,
+        environment: str,
+        release_version: str,
+        effective_since: datetime,
+    ) -> dict: ...
 
     async def get_issue_details(self, issue_id: str) -> dict: ...
-
-    async def search_traces(self, project: str, query: str) -> dict: ...
 ```
 
-Future upgrade path: replace with Sentry MCP stdio transport when ESS requires
-AI-powered search or broader Sentry coverage.
+This Phase 2 slice is now implemented on the current runtime path. It added the
+second production signal source with the smallest operational and packaging
+surface area while aligning the Sentry query surface with ESS's release-centric
+deploy context.
 
-#### E2.3 — Log scout adapter (remote log search)
+Implementation requirements:
 
-ESS calls the ESS Log Scout agent running on the syslog server via HTTP:
+- Require `deployment.release_version` and `services[].sentry_project_id` for
+    Sentry-enabled services in real deploy payloads.
+- Fetch release details each investigation cycle and compute
+    `effective_since = max(deployment.deployed_at, release.dateCreated)`.
+- Default to the query shape
+    `release:"{release}" firstSeen:>={effective_since} is:unresolved issue.category:error`.
+- Treat `first-release:"{release}"` as a tested alternate on the self-hosted
+    instance, but not the canonical filter, because ESS must preserve
+    deploy-time precision.
+- Validate external Sentry responses into typed pydantic boundary models before they are exposed to the agent layer.
+- Keep all auth and host configuration in `ESSConfig`; do not read raw environment variables in the adapter.
+- Use explicit aiohttp timeouts, bounded 429 retry handling, a circuit breaker, and a concurrency limit so the adapter matches ESS async-safety rules.
+- Add typed Sentry settings on `ESSConfig` for request timeout, concurrency limit, and any circuit-breaker thresholds used by the adapter; do not hide these as adapter-local magic numbers.
+- Do not cache release details in v1; prefer fresh reads per investigation cycle.
 
-```python
-class LogScoutTool:
-    """Call the remote ESS Log Scout agent for log search."""
+Future upgrade path: Phase 6 may replace or augment this with Sentry MCP stdio
+transport if the release-aware REST runtime proves insufficient.
 
-    async def search(self, service: str, query: str,
-                     minutes_back: int = 10,
-                     log_scout_url: str | None = None) -> dict:
-        """POST to the log scout and return matched entries."""
-        url = log_scout_url or self.config.default_log_scout_url
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/search",
-                json={
-                    "service": service,
-                    "query": query,
-                    "minutes_back": minutes_back,
-                },
-                timeout=aiohttp.ClientTimeout(total=120),
-            )
-            return await resp.json()
-```
+#### E2.3 — Unified tool-result normalisation for Sentry
 
-The log scout runs on the syslog server, handles ripgrep execution and
-`services.yaml` resolution locally, and returns only matched log entries over the
-wire. Each service in a deploy trigger can specify a different `log_search_host`
-so ESS can query region-specific syslog servers.
-
-> **Note**: The ESS Log Scout is a separate service with its own plan. It shares
-> patterns from log-ai but is packaged as a minimal HTTP microservice, not an MCP
-> server.
-
-#### E2.4 — Unified tool-result normalisation
+Datadog already uses this shape today. Phase 2 extends it for Sentry so the
+orchestrator can consume both signal sources through one contract.
 
 All tool adapters return a common shape:
 
 ```python
 @dataclass
 class ToolResult:
-    tool: str           # "datadog.monitors", "sentry.issues", "logs.search"
+    tool: str           # "datadog.monitor_status", "sentry.new_release_issues", "logs.search"
     success: bool
     data: dict | list   # normalised payload
     summary: str        # one-line human-readable summary
@@ -954,10 +987,64 @@ class ToolResult:
 
 The orchestrator works with `ToolResult` objects, not raw JSON from different APIs.
 
-#### E2.5–E2.6 — Tests and docs
+The Sentry extension of this contract should include:
 
-Unit tests per adapter with mocked subprocess/HTTP responses. Integration tests
-with real Datadog/Sentry (marked `@pytest.mark.integration`).
+- stable tool names for project details, release details, new release issues, and issue details
+- summaries suitable for Bedrock `toolResult` content
+- raw payload retention for trace/debug use
+- pydantic-validated adapter output before normalisation
+
+#### E2.4 — Tests for the Sentry adapter and Bedrock tool layer
+
+- Unit tests for the Sentry adapter with mocked HTTP responses
+- Validation tests for boundary models and normalisation helpers
+- Resilience tests for timeout handling, bounded 429 retry behaviour, and circuit breaker state
+- Bedrock tool-layer tests for Sentry tool definitions and result mapping
+- Integration tests with real Datadog/Sentry where practical (marked `@pytest.mark.integration`)
+
+#### E2.5 — Documentation update — Sentry-first tool integration guide
+
+Document:
+
+- required `.env` variables and scopes for Sentry
+- release-aware query shapes, including the canonical `release + firstSeen` filter
+- REST-first implementation choice and why MCP is deferred to Phase 6
+- timeout, retry, and circuit-breaker behaviour
+- how Sentry findings flow into the shared `ToolResult` and agent workflow
+
+#### E2.6 — Release-aware deploy context and project identity
+
+- Add `deployment.release_version` to the deploy schema.
+- Require `services[].sentry_project_id` for Sentry-enabled services.
+- Update trigger examples, tests, and prompt-building so the orchestrator has
+    the exact release identity that Sentry uses.
+
+Status:
+
+- Implemented on 2026-03-29 in the current Datadog-first runtime foundation.
+- Schema validation, checked-in example fixtures, and realistic local trigger
+    helpers now carry release-aware Sentry identity.
+
+#### E2.7 — Release-aware query surface, tool cleanup, and orchestration seam
+
+- Implement project-details and release-details lookups.
+- Implement the new release issue-group query using `effective_since`.
+- Keep issue details as the investigation path and leave trace and latency investigation on Datadog.
+- Ensure Phase 3 orchestration uses Datadog first, then Sentry only when
+    Datadog indicates a problem.
+
+Historical planning notes for this implemented phase:
+
+- Treat the current generic `query_issues(...)` and `sentry_query_issues` surfaces
+    as migration targets rather than permanent v1 APIs.
+- Remove generic issue search from the default Sentry tool config once the
+    release-aware query path lands.
+- Do not retain a Sentry trace-search surface in the shipped REST path; Datadog
+    already covers traces and latency investigation for this runtime.
+- Update schema fixtures and tests in the same migration, especially
+    `docs/examples/triggers/example-service-e2e.json`, `tests/test_models.py`,
+    `tests/test_sentry_tool.py`, `tests/test_sentry_tools.py`, and
+    `tests/test_health_check_agent.py`.
 
 ---
 
@@ -966,13 +1053,17 @@ with real Datadog/Sentry (marked `@pytest.mark.integration`).
 **Goal**: An LLM-driven reasoning loop that runs health checks, detects anomalies,
 investigates root cause, and produces actionable reports.
 
-Phase 1.5 pulls forward the Datadog-only slice of this work. Phase 3 remains the
-place for the **full multi-tool orchestrator** spanning Datadog, Sentry, and Log Scout,
-with richer escalation, context management, and correlation behavior.
+Phase 1.5 already shipped the first real slice of this work in the form of the
+Datadog-only agent loop. Phase 3 therefore starts from the shipped runtime,
+generalising it into a broader orchestrator instead of replacing it.
+
+The immediate Phase 3 target is a **Datadog + Sentry orchestrator** built on the
+release-aware Sentry plan. Log Scout remains a later Phase 6 expansion once the
+two-signal runtime is stable.
 
 #### E3.1 — Agent orchestrator
 
-Classic ReAct tool-calling loop:
+Generalise the shipped Datadog loop into a multi-tool ReAct orchestrator:
 
 ```python
 class HealthCheckAgent:
@@ -990,13 +1081,13 @@ class HealthCheckAgent:
         self.investigation_model = "global.anthropic.claude-sonnet-4-6"
         self.current_model = self.triage_model
 
-    async def run_health_check(self) -> HealthReport:
+    async def run_health_check(self) -> HealthCheckResult:
         """Execute one health-check cycle."""
         self.conversation = [self._build_system_prompt()]
         self.conversation.append(self._build_check_prompt())
 
         for i in range(self.max_iterations):
-            response = self.bedrock.converse(
+            response = await self.bedrock.converse(
                 modelId=self.current_model,
                 messages=self.conversation,
                 toolConfig=self._tool_config(),
@@ -1019,13 +1110,15 @@ class HealthCheckAgent:
 
 #### E3.2 — System prompt and tool descriptions
 
-The system prompt instructs the agent:
-- You are a post-deploy health monitor for `{service_name}` deployed to `{env}`
+The next prompt revision instructs the agent:
+- You are a post-deploy health monitor for one deployment that may include multiple services in `{env}`
 - Your job is to check whether the deployment is healthy
-- You have access to Datadog, Sentry, and log search tools
-- Run standard health checks first (monitors, error logs, APM stats, Sentry issues)
+- You have access to Datadog and Sentry tools, with log search added later
+- Run standard health checks first for every service target (monitors, error logs, APM stats)
+- Use Sentry only after Datadog indicates a warning, critical, latency, or post-deploy error symptom
+- Use the exact deploy `release_version` and the required `sentry_project_id` for Sentry correlation
 - If anomalies are found, investigate deeper using additional tool calls
-- Produce a structured health report with severity, findings, and recommendations
+- Produce a structured health report with per-service findings, an overall severity, and recommendations
 - You must NOT take any remediation actions — observation and reporting only
 - Be concise — summarise tool outputs instead of repeating them
 
@@ -1034,23 +1127,25 @@ parameter schemas and usage guidance.
 
 #### E3.3 — Health-check workflow
 
-Each check cycle follows this pattern:
+Each check cycle follows this pattern across all services in the trigger:
 
 1. **Triage** (always runs):
    - Check Datadog monitors for the service → any alerting/warning?
    - Search Datadog logs for errors in the last N minutes
    - Get APM latency and error rate stats
-   - Query Sentry for new/unresolved issues since deploy time
-   - Search raw logs for error patterns
+    - If Datadog is degraded, fetch Sentry release details and query only issue groups first seen after `effective_since`
 
 2. **Investigate** (runs if triage finds anomalies):
    - Get specific Sentry issue details (stack trace, affected users)
-   - Search logs for the specific error pattern found in Sentry
-   - Check APM for slow endpoints or elevated error rates on specific routes
+    - Check APM for slow endpoints or elevated error rates on specific routes
+    - Use Datadog APM and traces when latency or failed-request symptoms need deeper investigation
    - Check infrastructure health (host CPU, memory, disk)
-   - Correlate: did errors start exactly at deploy time?
+    - Correlate: did new issue groups start at or after `effective_since`?
 
-3. **Report**:
+3. **Later expansion**:
+     - Add Log Scout-backed raw log correlation in Phase 6 after the Datadog + Sentry path is stable
+
+4. **Report**:
    - Severity: `HEALTHY` | `WARNING` | `CRITICAL`
    - Findings summary with evidence from each tool
    - Correlation analysis (deploy time vs. issue onset)
@@ -1060,33 +1155,31 @@ Each check cycle follows this pattern:
 
 ```python
 class MonitoringSession:
-    """Manages the full monitoring window for one deployment."""
+    """Tracks escalation state across scheduler-driven health-check cycles."""
 
-    async def run(self):
-        healthy_count = 0
-        warning_count = 0
-        critical_count = 0
+    def record_cycle_result(self, report: HealthCheckResult) -> NotificationDecision:
+        """Update per-session escalation state after one scheduler tick."""
+        if report.overall_severity == "HEALTHY":
+            self.consecutive_warnings = 0
+            return NotificationDecision.none()
 
-        for cycle in range(self.total_cycles):
-            report = await self.agent.run_health_check()
+        if report.overall_severity == "WARNING":
+            self.consecutive_warnings += 1
+            if self.consecutive_warnings >= 2:
+                return NotificationDecision.warning(report)
+            return NotificationDecision.none()
 
-            match report.severity:
-                case "HEALTHY":
-                    healthy_count += 1
-                case "WARNING":
-                    warning_count += 1
-                    if warning_count >= 2:  # consecutive warnings
-                        await self.notify_warning(report)
-                case "CRITICAL":
-                    critical_count += 1
-                    await self.notify_critical(report)  # immediate alert
-                    # Escalate: switch to Sonnet for deeper investigation
-                    self.agent.current_model = self.agent.investigation_model
+        if report.overall_severity == "CRITICAL":
+            self.consecutive_warnings = 0
+            return NotificationDecision.critical(report)
 
-            await asyncio.sleep(self.check_interval_seconds)
-
-        await self.notify_summary(healthy_count, warning_count, critical_count)
+        return NotificationDecision.none()
 ```
+
+Implementation note: APScheduler remains the only component responsible for
+timing and repeated execution. Phase 3 should evolve the per-cycle agent logic
+and per-session escalation state, not introduce a second long-running sleep loop
+inside the monitoring session object.
 
 #### E3.5 — Context-window management
 
@@ -1100,12 +1193,18 @@ Strategy:
 - Use the LLM itself to produce the summary ("Summarise the health check findings
   so far in 200 words")
 
-#### E3.6–E3.7 — Tests and docs
+#### E3.6 — Unit and integration tests for the orchestrator
 
 - Unit tests with mocked LLM responses and tool results
 - Test the ReAct loop terminates correctly on healthy, warning, and critical paths
 - Test context-window compaction
-- Document the orchestration design and prompt engineering approach
+- Test scheduler-driven escalation state across repeated cycles without introducing a second timing loop
+
+#### E3.7 — Documentation update — orchestration design
+
+- Document the orchestrator architecture as an evolution of the shipped Datadog loop
+- Document Datadog + Sentry prompt/tool flow before Log Scout is added
+- Document how escalation state works across APScheduler ticks
 
 ---
 
@@ -1182,7 +1281,7 @@ RUN curl -fsSL https://github.com/datadog-labs/pup/releases/latest/download/pup-
 # Note: ripgrep NOT needed in ESS container — log search runs on the
 # ESS Log Scout agent deployed on syslog servers
 
-# Install Node.js for Sentry MCP (future upgrade path)
+# Install Node.js for Sentry MCP (Phase 6 future upgrade path)
 # RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs
 
 WORKDIR /app
@@ -1272,9 +1371,67 @@ notify_ess:
 
 | Dependency | Purpose | When |
 |---|---|---|
-| `@sentry/mcp-server` | Sentry MCP stdio server | Phase 2 upgrade |
+| `@sentry/mcp-server` | Sentry MCP stdio server | Phase 6 expansion |
 | Redis | Job persistence, shared state | Phase 5+ |
 | LangGraph | Complex investigation workflows | If orchestration outgrows ReAct loop |
+
+---
+
+### Phase 6 — Deferred Expansion Paths
+
+**Goal**: Evaluate and implement broader integrations only after the release-aware
+Datadog plus Sentry runtime has proven value in production-style monitoring.
+
+#### E6.1 — Evaluate Sentry MCP stdio transport as a post-v1 expansion path
+
+This evaluation happens only after the release-aware REST-backed Sentry path is
+stable. The evaluation should decide:
+
+- whether MCP materially improves the signal quality or operator experience
+- whether the added Node.js and stdio lifecycle complexity is justified
+- whether REST and MCP should share one tool interface behind a feature flag
+
+#### E6.2 — Optional Sentry MCP backend
+
+- Implement MCP only if E6.1 shows a clear gain over the release-aware REST path.
+- Keep REST as the default backend until MCP demonstrates better operational value.
+
+#### E6.3 — Log Scout adapter (remote log search)
+
+This work stays deferred until the Datadog plus Sentry orchestrator is stable.
+
+ESS calls the ESS Log Scout agent running on the syslog server via HTTP:
+
+```python
+class LogScoutTool:
+    """Call the remote ESS Log Scout agent for log search."""
+
+    async def search(self, service: str, query: str,
+                     minutes_back: int = 10,
+                     log_scout_url: str | None = None) -> dict:
+        """POST to the log scout and return matched entries."""
+        url = log_scout_url or self.config.default_log_scout_url
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(
+                f"{url}/search",
+                json={
+                    "service": service,
+                    "query": query,
+                    "minutes_back": minutes_back,
+                },
+                timeout=aiohttp.ClientTimeout(total=120),
+            )
+            return await resp.json()
+```
+
+The log scout runs on the syslog server, handles ripgrep execution and
+`services.yaml` resolution locally, and returns only matched log entries over the
+wire. Each service in a deploy trigger can specify a different `log_search_host`
+so ESS can query region-specific syslog servers.
+
+> **Note**: The ESS Log Scout is a separate service with its own plan. It shares
+> patterns from log-ai but is packaged as a minimal HTTP microservice, not an MCP
+> server.
 
 ### Not Needed (Replaced by Pup)
 
@@ -1318,20 +1475,20 @@ notify_ess:
 
 ### Narrowed First Ship — Phase 1.5
 
-- [ ] A GitLab pipeline can trigger ESS with a single curl command
-- [ ] ESS monitors the Datadog-backed service for the full configured 30-60 minute window
-- [ ] The Datadog-only agent loop produces coherent per-cycle health results without human polling
-- [ ] When `ESS_DEBUG_TRACE_ENABLED=true`, a structured local trace records prompts, tool actions, findings, assistant outputs, and final summaries for every cycle
-- [ ] When `ESS_DEBUG_TRACE_ENABLED=false`, ESS writes no local trace file and remains inspectable through the session API and structured logs
-- [ ] The Phase 1.5 instrumentation layer preserves an OpenTelemetry-friendly event model so Phase 5 can add exporters without rewriting agent logic
-- [ ] When `ESS_TEAMS_ENABLED=false`, ESS performs no Teams actions
-- [ ] When `ESS_TEAMS_ENABLED=true`, ESS sends warning, critical, and end-of-window notifications to Teams
-- [ ] ESS does NOT take any remediation actions — observation and reporting only
+- [x] A GitLab pipeline can trigger ESS with a single curl command
+- [x] ESS monitors the Datadog-backed service for the full configured 30-60 minute window
+- [x] The Datadog-only agent loop produces coherent per-cycle health results without human polling
+- [x] When `ESS_DEBUG_TRACE_ENABLED=true`, a structured local trace records prompts, tool actions, findings, assistant outputs, and final summaries for every cycle
+- [x] When `ESS_DEBUG_TRACE_ENABLED=false`, ESS writes no local trace file and remains inspectable through the session API and structured logs
+- [x] The Phase 1.5 instrumentation layer preserves an OpenTelemetry-friendly event model so Phase 5 can add exporters without rewriting agent logic
+- [x] When `ESS_TEAMS_ENABLED=false`, ESS performs no Teams actions
+- [x] When `ESS_TEAMS_ENABLED=true`, ESS sends warning, critical, and end-of-window notifications to Teams
+- [x] ESS does NOT take any remediation actions — observation and reporting only
 
 ### Full ESS Target
 
 - [ ] ESS correctly queries Datadog via Pup CLI (monitors, logs, APM) for the deployed service
-- [ ] ESS correctly queries Sentry for new issues since deploy time
+- [ ] ESS correctly queries Sentry for new issue groups in the deployed release using `effective_since`
 - [ ] ESS correctly searches raw logs for error patterns post-deploy
 - [ ] The AI agent produces a coherent health report correlating signals across all tools
 - [ ] MS Teams receives a rich adaptive card within 2 minutes of the first health check
