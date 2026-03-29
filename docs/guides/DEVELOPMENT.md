@@ -151,9 +151,11 @@ docker run --rm ess:dev pup --version
 # Run tests on the host (the production image excludes tests/ by design)
 uv run pytest
 
-# Or with docker compose
+# Or with the checked-in compose file
 docker compose up --build
 ```
+
+For production-shaped container deployment and the GitLab post-deploy trigger template, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Plan-Driven Workflow
 

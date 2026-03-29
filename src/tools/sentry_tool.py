@@ -24,6 +24,8 @@ import aiohttp
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
+from src.metrics import ESSMetrics
+
 if TYPE_CHECKING:
     from src.config import ESSConfig
 
@@ -186,8 +188,9 @@ class SentryResult[T]:
 class SentryTool:
     """Execute Sentry REST API calls with validation and bounded async I/O."""
 
-    def __init__(self, config: ESSConfig) -> None:
+    def __init__(self, config: ESSConfig, metrics: ESSMetrics | None = None) -> None:
         self.config = config
+        self.metrics = metrics
         self._semaphore = asyncio.Semaphore(config.sentry_max_concurrent)
         self._consecutive_failures = 0
         self._circuit_open = False
@@ -320,7 +323,8 @@ class SentryTool:
     ) -> SentryResult[dict[str, Any] | list[Any]]:
         if self._circuit_open:
             logger.warning("sentry_circuit_open", operation=operation, request_path=request_path)
-            return SentryResult(
+            return self._finalize_result(
+                SentryResult(
                 operation=operation,
                 request_path=request_path,
                 status_code=0,
@@ -328,6 +332,7 @@ class SentryTool:
                 error="Circuit breaker open — Sentry API disabled after consecutive failures",
                 duration_ms=0,
                 raw={"params": params or {}},
+                )
             )
 
         url = f"{self.config.sentry_base_url()}{request_path}"
@@ -349,7 +354,8 @@ class SentryTool:
                         request_path=request_path,
                         error=str(exc),
                     )
-                    return SentryResult(
+                    return self._finalize_result(
+                        SentryResult(
                         operation=operation,
                         request_path=request_path,
                         status_code=0,
@@ -357,6 +363,7 @@ class SentryTool:
                         error=str(exc),
                         duration_ms=duration_ms,
                         raw={"url": url, "params": params or {}},
+                        )
                     )
 
                 raw = {
@@ -380,7 +387,8 @@ class SentryTool:
                         continue
 
                     self._record_failure()
-                    return SentryResult(
+                    return self._finalize_result(
+                        SentryResult(
                         operation=operation,
                         request_path=request_path,
                         status_code=response.status,
@@ -388,11 +396,13 @@ class SentryTool:
                         error="Sentry API rate-limited after bounded retries",
                         duration_ms=duration_ms,
                         raw=raw,
+                        )
                     )
 
                 if response.status >= 400:
                     self._record_failure()
-                    return SentryResult(
+                    return self._finalize_result(
+                        SentryResult(
                         operation=operation,
                         request_path=request_path,
                         status_code=response.status,
@@ -400,13 +410,15 @@ class SentryTool:
                         error=f"Sentry API {response.status}: {body_text[:200]}",
                         duration_ms=duration_ms,
                         raw=raw,
+                        )
                     )
 
                 try:
                     payload = json.loads(body_text) if body_text else {}
                 except json.JSONDecodeError as exc:
                     self._record_failure()
-                    return SentryResult(
+                    return self._finalize_result(
+                        SentryResult(
                         operation=operation,
                         request_path=request_path,
                         status_code=response.status,
@@ -414,10 +426,12 @@ class SentryTool:
                         error=f"Invalid JSON from Sentry API: {exc}",
                         duration_ms=duration_ms,
                         raw=raw,
+                        )
                     )
 
                 self._consecutive_failures = 0
-                return SentryResult(
+                return self._finalize_result(
+                    SentryResult(
                     operation=operation,
                     request_path=request_path,
                     status_code=response.status,
@@ -425,9 +439,11 @@ class SentryTool:
                     error=None,
                     duration_ms=duration_ms,
                     raw=raw,
+                    )
                 )
 
-        return SentryResult(
+        return self._finalize_result(
+            SentryResult(
             operation=operation,
             request_path=request_path,
             status_code=0,
@@ -435,6 +451,7 @@ class SentryTool:
             error="Sentry request did not complete",
             duration_ms=0,
             raw={"url": url, "params": params or {}},
+            )
         )
 
     def _retry_after_seconds(self, response: aiohttp.ClientResponse) -> int:
@@ -453,6 +470,11 @@ class SentryTool:
                 "sentry_circuit_opened",
                 consecutive_failures=self._consecutive_failures,
             )
+
+    def _finalize_result(self, result: SentryResult[T]) -> SentryResult[T]:
+        if self.metrics is not None:
+            self.metrics.record_tool_call("sentry.api", result.duration_ms)
+        return result
 
     def _coerce_failure(self, result: SentryResult[Any]) -> SentryResult[Any]:
         return SentryResult(

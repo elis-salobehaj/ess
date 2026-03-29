@@ -33,12 +33,12 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from src.metrics import ESSMetrics
+
 if TYPE_CHECKING:
     from src.config import ESSConfig
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)  # type: ignore[assignment]
-
-_CIRCUIT_BREAKER_THRESHOLD = 3
 
 
 # ---------------------------------------------------------------------------
@@ -86,8 +86,9 @@ class PupTool:
         ...
     """
 
-    def __init__(self, config: ESSConfig) -> None:
+    def __init__(self, config: ESSConfig, metrics: ESSMetrics | None = None) -> None:
         self.config = config
+        self.metrics = metrics
         self._semaphore = asyncio.Semaphore(config.pup_max_concurrent)
         self._consecutive_failures = 0
         self._circuit_open = False
@@ -115,12 +116,14 @@ class PupTool:
 
         if self._circuit_open:
             logger.warning("pup_circuit_open", command=command_str)
-            return PupResult(
+            return self._finalize_result(
+                PupResult(
                 command=command_str,
                 exit_code=-1,
                 data=None,
                 stderr="Circuit breaker open — Pup CLI disabled after consecutive failures",
                 duration_ms=0,
+                )
             )
 
         async with self._semaphore:
@@ -142,12 +145,14 @@ class PupTool:
                 elapsed = int((time.monotonic() - t_start) * 1000)
                 self._record_failure()
                 logger.error("pup_not_found", command=command_str)
-                return PupResult(
+                return self._finalize_result(
+                    PupResult(
                     command=command_str,
                     exit_code=-1,
                     data=None,
                     stderr="pup executable not found — is it installed and on $PATH?",
                     duration_ms=elapsed,
+                    )
                 )
 
             try:
@@ -166,12 +171,14 @@ class PupTool:
                     timeout_s=effective_timeout,
                     duration_ms=elapsed,
                 )
-                return PupResult(
+                return self._finalize_result(
+                    PupResult(
                     command=command_str,
                     exit_code=-1,
                     data=None,
                     stderr=f"Timed out after {effective_timeout}s",
                     duration_ms=elapsed,
+                    )
                 )
 
             elapsed = int((time.monotonic() - t_start) * 1000)
@@ -187,12 +194,14 @@ class PupTool:
                     duration_ms=elapsed,
                     stderr=stderr_str[:200],
                 )
-                return PupResult(
+                return self._finalize_result(
+                    PupResult(
                     command=command_str,
                     exit_code=exit_code,
                     data=None,
                     stderr=stderr_str,
                     duration_ms=elapsed,
+                    )
                 )
 
             # Success — reset the circuit breaker consecutive-failure counter.
@@ -206,17 +215,24 @@ class PupTool:
                 data = {"raw_output": stdout.decode(errors="replace")}
 
             logger.debug("pup_ok", command=command_str, duration_ms=elapsed)
-            return PupResult(
+            return self._finalize_result(
+                PupResult(
                 command=command_str,
                 exit_code=0,
                 data=data,
                 stderr=stderr_str,
                 duration_ms=elapsed,
+                )
             )
+
+    def _finalize_result(self, result: PupResult) -> PupResult:
+        if self.metrics is not None:
+            self.metrics.record_tool_call("datadog.pup", result.duration_ms)
+        return result
 
     def _record_failure(self) -> None:
         self._consecutive_failures += 1
-        if self._consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+        if self._consecutive_failures >= self.config.pup_circuit_breaker_threshold:
             self._circuit_open = True
             logger.error(
                 "pup_circuit_opened",

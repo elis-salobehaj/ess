@@ -26,6 +26,7 @@ application code.
 | `DD_SITE` | No | `datadoghq.com` | Datadog site base domain used by Pup |
 | `PUP_MAX_CONCURRENT` | No | `10` | Max parallel Pup CLI calls |
 | `PUP_DEFAULT_TIMEOUT` | No | `60` | Pup subprocess timeout (seconds) |
+| `PUP_CIRCUIT_BREAKER_THRESHOLD` | No | `3` | Consecutive Pup failures before the adapter opens its circuit |
 
 ### Sentry
 

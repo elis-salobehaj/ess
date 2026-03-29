@@ -63,7 +63,7 @@ flowchart LR
 - Receives `POST /api/v1/deploy` from GitLab pipelines
 - Validates multi-service deploy payloads via pydantic
 - Returns `202 Accepted` with job ID and schedule details
-- Exposes `/health` and `/api/v1/status` endpoints
+- Exposes `/health`, `/api/v1/status`, and `/metrics` endpoints
 
 ### Job Scheduler (APScheduler)
 - Creates interval jobs on deploy trigger (every N minutes)

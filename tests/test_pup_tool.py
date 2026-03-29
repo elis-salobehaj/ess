@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.config import ESSConfig
+from src.metrics import ESSMetrics
 from src.models import ToolResult
 from src.tools.normalise import pup_to_tool_result
 from src.tools.pup_tool import PupResult, PupTool
@@ -146,6 +147,18 @@ class TestPupToolExecuteSuccess:
         positional_args = mock_exec.call_args.args
         assert "--output" in positional_args
         assert "json" in positional_args
+
+    async def test_records_metrics_for_successful_calls(self) -> None:
+        cfg = _cfg()
+        metrics = ESSMetrics()
+        tool = PupTool(cfg, metrics=metrics)
+
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = _mock_proc(b"{}")
+            await tool.execute(["monitors", "list"])
+
+        rendered = metrics.render_prometheus()
+        assert 'ess_tool_calls_total{tool="datadog.pup"} 1' in rendered
 
 
 class TestPupToolExecuteFailurePaths:

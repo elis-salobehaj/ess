@@ -1,0 +1,12 @@
+services:
+  ess:
+    build:
+      context: .
+    image: ess:local
+    env_file:
+      - config/.env
+    ports:
+      - "${ESS_PORT:-8080}:8080"
+    restart: unless-stopped
+    volumes:
+      - ./_local_observability:/app/_local_observability

@@ -1,0 +1,45 @@
+stages:
+  - deploy
+  - post-deploy
+
+notify_ess:
+  stage: post-deploy
+  image: curlimages/curl:8.12.1
+  script:
+    - |
+      set -eu
+      timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      cat <<EOF >/tmp/ess-trigger.json
+      {
+        "deployment": {
+          "gitlab_pipeline_id": "${CI_PIPELINE_ID}",
+          "gitlab_project": "${CI_PROJECT_PATH}",
+          "commit_sha": "${CI_COMMIT_SHA}",
+          "release_version": "${RELEASE_VERSION}",
+          "deployed_by": "${GITLAB_USER_LOGIN}",
+          "deployed_at": "${timestamp}",
+          "environment": "production",
+          "regions": ["ca"]
+        },
+        "services": [
+          {
+            "name": "${CI_PROJECT_NAME}",
+            "datadog_service_name": "${DD_SERVICE_NAME}",
+            "sentry_project": "${SENTRY_PROJECT}",
+            "sentry_project_id": ${SENTRY_PROJECT_ID},
+            "infrastructure": "ECS Fargate"
+          }
+        ],
+        "monitoring": {
+          "window_minutes": ${ESS_WINDOW_MINUTES:-30},
+          "check_interval_minutes": ${ESS_INTERVAL_MINUTES:-5}
+        }
+      }
+      EOF
+      curl -fsS \
+        -H "Content-Type: application/json" \
+        -X POST "${ESS_URL}/api/v1/deploy" \
+        --data @/tmp/ess-trigger.json
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success

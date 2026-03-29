@@ -10,7 +10,7 @@
 3. ESS validates the payload, returns `202 Accepted` with job ID
 4. APScheduler creates an interval job for the monitoring window
 5. Job ticks every `check_interval_minutes` until `window_minutes` expires
-6. On window expiry, the job auto-removes and emits an end-of-window summary notification when Teams mode is enabled
+6. On window expiry, the job auto-removes and emits the completion callback; in `real-world` mode ESS only posts a completion card when repeated warnings persisted through the full window
 
 ## Health-Check Cycle (per tick)
 
@@ -79,6 +79,13 @@ For each service in the trigger:
 6. The default `real-world` mode posts critical alerts immediately, requests early monitoring completion after that critical cycle, defers warning notifications to window completion, and suppresses the completion-summary card in Teams
 7. Investigation follow-up thread replies require a future Graph or bot transport because Incoming Webhooks do not expose reply/thread semantics or parent message IDs
 8. `all` mode remains available for harness-driven copy review and test-channel validation of every card type
+
+## Self-Observability
+
+- `GET /health` exposes liveness plus the current active-session count
+- `GET /api/v1/status` exposes active-session state for operators and harnesses
+- `GET /metrics` exposes Prometheus text metrics for active sessions, completed checks, successful Teams alerts, and external tool call durations
+- Phase 5 keeps `_local_observability/` as the local fallback sink while standardising future external export on OTLP/HTTP through an OpenTelemetry Collector
 
 ## Documentation Practices
 

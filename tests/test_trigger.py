@@ -193,3 +193,23 @@ class TestHealthAndStatus:
         assert response.status_code == 200
         body = response.json()
         assert body["active_sessions"] >= 1
+
+    async def test_metrics_returns_prometheus_payload(
+        self,
+        client: AsyncClient,
+        app,
+        valid_deploy_payload: dict,
+    ) -> None:
+        await client.post("/api/v1/deploy", json=valid_deploy_payload)
+        app.state.metrics.record_check_executed()
+        app.state.metrics.record_alert_sent()
+        app.state.metrics.record_tool_call("datadog.pup", 42)
+
+        response = await client.get("/metrics")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert "ess_active_sessions 1" in response.text
+        assert "ess_checks_executed_total 1" in response.text
+        assert "ess_alerts_sent_total 1" in response.text
+        assert 'ess_tool_calls_total{tool="datadog.pup"} 1' in response.text

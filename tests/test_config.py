@@ -27,6 +27,7 @@ class TestConfigDefaults:
         cfg = ESSConfig(_env_file=None, dd_api_key="k", dd_app_key="a", sentry_auth_token="s")
         assert cfg.pup_max_concurrent == 10
         assert cfg.pup_default_timeout == 60
+        assert cfg.pup_circuit_breaker_threshold == 3
 
     def test_default_sentry_runtime_values(self) -> None:
         cfg = ESSConfig(_env_file=None, dd_api_key="k", dd_app_key="a", sentry_auth_token="s")

@@ -23,12 +23,13 @@ from typing import Any, TextIO
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.agent.health_check_agent import DatadogHealthCheckAgent
 from src.agent.trace import AgentTraceRecorder
 from src.config import ESSConfig
 from src.llm_client import make_investigation_client, make_triage_client
+from src.metrics import ESSMetrics
 from src.models import (
     CancelResponse,
     DeployResponse,
@@ -111,7 +112,8 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)  # type: ignore[a
 def create_app(config: ESSConfig | None = None) -> FastAPI:
     cfg = config or ESSConfig()
     scheduler = ESSScheduler(max_sessions=cfg.max_concurrent_sessions)
-    pup_tool = PupTool(config=cfg)
+    metrics = ESSMetrics(active_sessions_provider=lambda: len(scheduler.active_sessions()))
+    pup_tool = PupTool(config=cfg, metrics=metrics)
     trace_recorder = AgentTraceRecorder(
         enabled=cfg.debug_trace_enabled,
         path=cfg.agent_trace_path,
@@ -123,7 +125,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     )
     triage_client = make_triage_client(cfg)
     investigation_client = make_investigation_client(cfg)
-    sentry_tool = SentryTool(config=cfg)
+    sentry_tool = SentryTool(config=cfg, metrics=metrics)
     datadog_agent = DatadogHealthCheckAgent(
         bedrock_client=triage_client,
         pup_tool=pup_tool,
@@ -155,6 +157,7 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
     app.state.datadog_agent = datadog_agent
     app.state.trace_recorder = trace_recorder
     app.state.teams_publisher = teams_publisher
+    app.state.metrics = metrics
 
     # -----------------------------------------------------------------------
     # Exception handlers
@@ -179,6 +182,10 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
             "active_sessions": active,
             "timestamp": datetime.now(tz=UTC).isoformat(),
         }
+
+    @app.get("/metrics", tags=["ops"], response_class=PlainTextResponse)
+    async def metrics_endpoint() -> PlainTextResponse:
+        return PlainTextResponse(metrics.render_prometheus())
 
     # -----------------------------------------------------------------------
     # Status — active monitoring sessions
@@ -229,12 +236,14 @@ def create_app(config: ESSConfig | None = None) -> FastAPI:
                     cfg,
                     trace_recorder,
                     teams_publisher,
+                    metrics,
                 ),
                 on_result_fn=_build_result_callback(
                     cfg,
                     trace_recorder,
                     teams_publisher,
                     scheduler,
+                    metrics,
                 ),
             )
         except ValueError as exc:
@@ -463,6 +472,7 @@ def _build_completion_callback(
     cfg: ESSConfig,
     trace_recorder: AgentTraceRecorder,
     teams_publisher: TeamsPublisher,
+    metrics: ESSMetrics | None = None,
 ):
     async def _on_complete(session: MonitoringSession) -> None:
         overall_severity = _aggregate_session_severity(session)
@@ -490,6 +500,7 @@ def _build_completion_callback(
                 teams_publisher,
                 session,
                 build_summary_notification(session),
+                    metrics,
             )
         else:
             warning_decision = build_completion_warning_notification(session)
@@ -500,6 +511,7 @@ def _build_completion_callback(
                     teams_publisher,
                     session,
                     warning_decision,
+                    metrics,
                 )
             else:
                 await trace_recorder.emit(
@@ -530,8 +542,11 @@ def _build_result_callback(
     trace_recorder: AgentTraceRecorder,
     teams_publisher: TeamsPublisher,
     scheduler: ESSScheduler | None = None,
+    metrics: ESSMetrics | None = None,
 ):
     async def _on_result(session: MonitoringSession, result: HealthCheckResult) -> None:
+        if metrics is not None:
+            metrics.record_check_executed()
         delivery_mode = resolve_teams_delivery_mode(cfg, session)
         decision, reason = evaluate_cycle_notification(session, result)
         if decision is None:
@@ -571,6 +586,7 @@ def _build_result_callback(
             teams_publisher,
             session,
             decision,
+            metrics,
         )
         if (
             delivery_mode == TeamsDeliveryMode.REAL_WORLD
@@ -623,6 +639,7 @@ def _build_result_callback(
             teams_publisher,
             session,
             investigation_decision,
+            metrics,
         )
 
     return _on_result
@@ -634,6 +651,7 @@ async def _deliver_notification(
     teams_publisher: TeamsPublisher,
     session: MonitoringSession,
     decision: NotificationDecision,
+    metrics: ESSMetrics | None = None,
 ) -> TeamsDeliveryResult | None:
     webhook_url, webhook_source = resolve_webhook_url(session, cfg.default_teams_webhook_url)
 
@@ -685,6 +703,8 @@ async def _deliver_notification(
         build_teams_card(cfg, session, decision),
     )
     if delivery.ok:
+        if metrics is not None:
+            metrics.record_alert_sent()
         await trace_recorder.emit(
             "notification.delivered",
             trace_id=session.job_id,

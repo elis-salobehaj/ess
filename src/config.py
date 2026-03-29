@@ -44,6 +44,7 @@ class ESSConfig(BaseSettings):
     dd_site: str = "datadoghq.com"
     pup_max_concurrent: int = 10  # max parallel Pup CLI subprocess calls
     pup_default_timeout: int = 60  # seconds per Pup subprocess call
+    pup_circuit_breaker_threshold: int = 3
 
     # -------------------------------------------------------------------------
     # Sentry

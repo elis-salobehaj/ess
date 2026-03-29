@@ -7,6 +7,7 @@ created: 2026-03-22
 date_updated: 2026-03-29
 related_files:
     - src/main.py
+    - src/metrics.py
     - src/config.py
     - src/models.py
     - src/scheduler.py
@@ -17,7 +18,11 @@ related_files:
     - src/tools/normalise.py
     - src/notifications/__init__.py
     - src/notifications/teams.py
+    - docker-compose.yml
+    - .gitlab-ci.example.yml
     - docs/examples/triggers/example-service-e2e.json
+    - tests/test_e2e_phase5.py
+    - tests/test_metrics.py
     - tests/test_health_check_agent.py
     - tests/test_main.py
     - tests/test_notifications.py
@@ -31,6 +36,7 @@ related_files:
     - docs/guides/DATADOG_SENTRY_ORCHESTRATION.md
     - docs/guides/SENTRY_REST_INTEGRATION.md
     - docs/guides/TEAMS_CHANNEL_INTEGRATION.md
+    - docs/guides/DEPLOYMENT.md
     - config/.env.example
 tags:
     - agentic-ai
@@ -81,13 +87,13 @@ completion:
     - [x] E4.5 Unit tests for notification layer
     - [x] E4.6 Documentation update — notification config guide
     - "# Phase 5 — Deployment, Observability & Hardening"
-    - [ ] E5.1 Containerise (Dockerfile, docker-compose)
-    - [ ] E5.2 GitLab CI pipeline template for trigger integration
-    - [ ] E5.3 Add ESS self-observability (structured logging, health endpoint)
-    - [ ] E5.4 Rate-limit and circuit-breaker for external API calls
-    - [ ] E5.5 End-to-end integration test with mock deploy trigger
-    - [ ] E5.6 Production deployment guide
-    - [ ] E5.7 Final review-plan-phase audit
+    - [x] E5.1 Containerise (Dockerfile, docker-compose)
+    - [x] E5.2 GitLab CI pipeline template for trigger integration
+    - [x] E5.3 Add ESS self-observability (structured logging, health endpoint)
+    - [x] E5.4 Rate-limit and circuit-breaker for external API calls
+    - [x] E5.5 End-to-end integration test with mock deploy trigger
+    - [x] E5.6 Production deployment guide
+    - [x] E5.7 Final review-plan-phase audit
     - "# Phase 6 — Deferred Expansion Paths"
     - [ ] E6.1 Evaluate Sentry MCP stdio transport after the release-aware REST runtime is stable
     - [ ] E6.2 Implement an optional Sentry MCP backend behind a feature flag only if evaluation justifies it

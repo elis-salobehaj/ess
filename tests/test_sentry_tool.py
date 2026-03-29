@@ -11,6 +11,7 @@ import aiohttp
 import pytest
 
 from src.config import ESSConfig
+from src.metrics import ESSMetrics
 from src.tools.normalise import (
     sentry_issue_detail_to_tool_result,
     sentry_new_release_issues_to_tool_result,
@@ -161,6 +162,29 @@ class TestSentryToolRequests:
             == "https://sentry.example.com/api/0/projects/example-org/auth-service/"
         )
         assert session.calls[0]["params"] is None
+
+    @pytest.mark.asyncio
+    async def test_records_metrics_for_successful_requests(self) -> None:
+        metrics = ESSMetrics()
+        tool = SentryTool(_cfg(), metrics=metrics)
+        session = _FakeSession(
+            [
+                _FakeResponse(
+                    payload={
+                        "id": 47,
+                        "slug": "auth-service",
+                        "name": "Auth Service",
+                    }
+                )
+            ]
+        )
+        tool._get_session = AsyncMock(return_value=session)
+
+        result = await tool.get_project_details("auth-service")
+
+        assert result.success is True
+        rendered = metrics.render_prometheus()
+        assert 'ess_tool_calls_total{tool="sentry.api"} 1' in rendered
 
     @pytest.mark.asyncio
     async def test_get_release_details_validates_and_returns_typed_model(self) -> None:

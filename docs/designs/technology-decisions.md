@@ -17,6 +17,8 @@ tables and rationale.
 | 7 | Notifications | MS Teams incoming webhook | Adaptive Cards, zero setup, webhook URL is the only secret |
 | 8 | LLM auth | Bedrock bearer token (ABSK) via botocore native bearer support | Consistent with Vellum/Wellspring stack, single token to manage, no raw AWS key/secret material in config |
 | 9 | First-ship runtime mode | Teams gated by env; local trace sink only in debug mode with an OpenTelemetry-aligned event model | Keeps the narrowed Datadog-only ship inspectable without making a local file trace the permanent observability surface |
+| 10 | ESS self-telemetry backend | Datadog-first, with an OpenTelemetry Collector seam and Sentry kept out of the primary metrics path | Datadog supports Prometheus/OpenMetrics scraping and OTLP metrics/traces, while Sentry explicitly does not support OTLP metrics |
+| 11 | Dashboard surface | Bun + Hono + React in a separate container, same mono-repo | Best fit for a self-hosted internal dashboard with low lock-in, explicit server seams, and a modern React UI without taking on unnecessary framework runtime complexity |
 
 ## LLM Model Selection
 
