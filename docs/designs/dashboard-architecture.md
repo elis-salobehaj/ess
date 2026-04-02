@@ -1,6 +1,6 @@
 # ESS Dashboard Architecture
 
-Date: 2026-03-29
+Date: 2026-03-31
 Status: recommended
 
 ## Question
@@ -14,6 +14,7 @@ ESS currently posts compact critical cards to Teams. What is the best way to bui
 - Teams is intentionally concise, especially in `real-world` mode.
 - ESS is a Python/FastAPI backend; there is no dashboard UI today.
 - The dashboard must be read-only and must not add remediation behavior.
+- Monitoring sessions are currently stored in memory, so ESS does not yet expose a durable service-by-service deploy history API.
 
 ## What The Dashboard Needs
 
@@ -56,12 +57,13 @@ ESS currently posts compact critical cards to Teams. What is the best way to bui
 - Bun is a fast all-in-one toolkit: runtime, package manager, test runner, and bundler can all come from the same toolchain.
 - Hono is a small Web-standards server framework with multi-runtime support across Bun, Node.js, Cloudflare Workers, AWS Lambda, and other targets.
 - Tailwind CSS v4 and shadcn/ui work well here because they are not tied to Next.js.
+- Biome fits this stack well for formatting and linting because it keeps the frontend toolchain small and fast.
 - This stack is attractive when the team wants a low-magic architecture with explicit routing, explicit middleware, and no provider-shaped runtime assumptions.
 
 What this stack gives ESS:
 
 - A thin, explicit backend-for-frontend layer if the dashboard needs auth, request validation, aggregation, or API proxying.
-- A straightforward React frontend, typically built with Vite, that remains portable and easy to reason about.
+- A straightforward React frontend that can be bundled directly with Bun instead of introducing a second build tool by default.
 - Lower framework lock-in because both the UI and the server can move between runtimes more easily.
 
 What this stack does not give automatically:
@@ -69,6 +71,13 @@ What this stack does not give automatically:
 - It does not prescribe page routing, layout conventions, or frontend data loading patterns.
 - The team still chooses those pieces directly instead of inheriting them from a framework.
 - That is more work up front than a batteries-included framework, but it is also less opinionated and easier to control over time.
+
+Questioning the need for Vite in this stack:
+
+- Vite is excellent, but once ESS has already chosen Bun and Hono, Vite becomes an extra frontend-specific layer rather than a necessary foundation.
+- Bun already provides install, run, test, and bundling surfaces. For a dashboard that is internal, card-heavy, and not especially animation- or plugin-driven, Bun's native build pipeline should be enough for v1.
+- The main reason to add Vite would be if the frontend starts needing plugin ecosystems or development ergonomics that Bun's frontend toolchain does not yet match well enough.
+- That makes Vite a fallback option, not the default recommendation.
 
 ### Next.js + TypeScript
 
@@ -160,14 +169,14 @@ That pushes the decision toward Bun + Hono rather than Next.js.
 
 ## Recommendation
 
-Use a TypeScript dashboard built with Bun, Hono, React, Vite, Tailwind CSS v4, shadcn/ui, and a small data-fetching layer such as TanStack Query or SWR.
+Use a TypeScript dashboard built with Bun, Hono, React, Bun-native bundling, Biome, Tailwind CSS v4, shadcn/ui, and a small data-fetching layer such as TanStack Query or SWR.
 
 Why this is the best fit for ESS:
 
 - It keeps the UI modern and high-quality without binding the dashboard to a framework-specific server runtime.
 - It gives ESS the lowest lock-in path among the TypeScript options considered.
 - It still supports a thin backend-for-frontend layer through Hono when the dashboard needs auth, request validation, or aggregation.
-- It keeps first delivery simple: static frontend plus explicit API proxying or direct ESS reads.
+- It keeps first delivery simple: Bun-native frontend build, explicit API proxying or direct ESS reads, and Biome for consistent lint/format enforcement.
 - It avoids pulling in advanced runtime features that ESS does not need yet but would still have to operate.
 
 ## Architecture Decision
@@ -201,16 +210,18 @@ Use a mono-repo.
 
 ### Initial Implementation Shape
 
-- React + Vite for the dashboard UI
+- React for the dashboard UI
 - Bun for installs, scripts, tests, and production runtime
+- Bun native build pipeline for frontend bundling
 - Hono for optional `/api/*` proxy and aggregation routes
+- Biome for formatting and linting
 - Tailwind CSS v4 and shadcn/ui for the card system and detail layout
 
 Treat Hono as a thin, explicit seam. Do not build a second application platform inside the dashboard container.
 
 ## Data Contract
 
-The first dashboard version should use the existing ESS read surfaces:
+The first dashboard version can use the existing ESS read surfaces for active-session visibility:
 
 - `GET /api/v1/status` for the active-session overview
 - `GET /api/v1/deploy/{job_id}` for session drilldown
@@ -223,7 +234,90 @@ That is enough for a minimal, informative dashboard today because `latest_result
 - services checked
 - raw tool outputs
 
-Add dedicated dashboard endpoints only if the UI outgrows the current read model. The likely next step would be a small read-only aggregation endpoint, not a new write path.
+For the longer-term public API, grouped service history is the better model.
+
+However, it should be added as a new read API, not by overloading the current `GET /api/v1/deploy/{job_id}` route.
+
+Why a new API exposure is better:
+
+- `GET /api/v1/deploy/{job_id}` is a monitoring-session resource, not a service-history resource.
+- Reusing `/api/v1/deploy/{service_name}` would create ambiguous path semantics because the current route already uses a single path segment for `job_id`.
+- Session lookup and service history solve different problems and should remain separate resources.
+- Dashboards and third-party consumers will want stable service-oriented history queries without depending on internal session IDs.
+
+Recommended shape:
+
+- Keep `GET /api/v1/deploy/{job_id}` as the operational session/debug endpoint.
+- Add a new service-history read model under a new namespace.
+
+Recommended new endpoints:
+
+- `GET /api/v1/services`
+- `GET /api/v1/services/{service_name}`
+- `GET /api/v1/services/{service_name}/environments/{environment}/deploys`
+- `GET /api/v1/services/{service_name}/environments/{environment}/deploys/{release_version}`
+
+Recommended responsibilities:
+
+- `GET /api/v1/services` returns the human-facing service names ESS has monitored within the default retention window, along with enough summary metadata to support a simple explorer UI.
+- `GET /api/v1/services/{service_name}` returns a service overview resource, including observed environments, latest deploy summaries per environment, and links to environment-scoped history.
+- `GET /api/v1/services/{service_name}/environments/{environment}/deploys` returns deploy history for one service in one environment, newest first.
+- `GET /api/v1/services/{service_name}/environments/{environment}/deploys/{release_version}` returns the release-specific history view for direct comparison, bookmarking, and external frontend drilldowns.
+
+Why environment belongs in the resource identity:
+
+- `release_version` should not be assumed globally unique across all environments.
+- Deploy comparison is usually environment-specific.
+- This keeps history queries unambiguous for QA, staging, and production.
+
+Suggested query parameters for `GET /api/v1/services/{service_name}/environments/{environment}/deploys`:
+
+- `latest_only=true|false`
+- `limit=<n>`
+- `severity=healthy,warning,critical`
+- `include_raw=true|false`
+- `include_debug=true|false`
+
+Chosen query semantics:
+
+- `latest_only=true` still returns a list, but a list with one item, so the response schema remains stable.
+- `severity` filtering should be supported on day one for dashboard and third-party frontend filtering.
+- `include_raw` and `include_debug` remain separate flags because they serve different use cases and allow tighter control over expensive or sensitive debug surfaces.
+
+Why `release_version` is a better stable secondary key than `job_id` for history:
+
+- It matches how teams think about deploy comparison.
+- It aligns with Sentry release-aware analysis already present in ESS.
+- It is more useful for longitudinal analysis than an opaque monitoring session identifier.
+
+Important architectural implication:
+
+- A service-history API is not only a route change. It requires a durable read model because ESS currently keeps monitoring sessions in memory.
+- If ESS should support historical comparisons and external dashboard consumers, it needs to persist deploy findings by service and release.
+- That persistence layer can still be append-only and read-optimized. It does not need to interfere with the current monitoring loop.
+
+Recommended direction:
+
+1. Keep the current session API for immediate operational inspection.
+2. Add a new persisted service-history projection for external consumers and dashboard use.
+3. Treat the service-history API as the long-term standard public read surface.
+4. Only deprecate `GET /api/v1/deploy/{job_id}` later if it truly becomes redundant. It may remain valuable indefinitely for debugging and trace correlation.
+5. Add a service-discovery endpoint so humans and third-party frontends can enumerate what ESS has monitored without already knowing the canonical service names.
+
+This means the better standard path is not `GET /api/v1/deploy/{service_name}`. The better path is a new service-oriented namespace with explicit history semantics.
+
+Chosen contract decisions for this design:
+
+- Public path key should be the human-facing service name from `ServiceTarget.name`.
+- Datadog and Sentry identifiers remain ESS-internal mapping details rather than public API keys.
+- Environment is part of the history resource shape.
+- Default retention target is 90 days.
+- `GET /api/v1/services` should expose all monitored human-facing service names seen within the retention window by default.
+- `GET /api/v1/services/{service_name}` should be a first-class overview resource, not just a redirect target, because environment-scoped history still needs one more level of navigation.
+- `latest_only=true` should return a one-element list rather than a single object so clients keep one schema shape.
+- Day-one severity filtering should be supported on the service-history endpoint.
+- Default responses should include summaries, evidence links, and structured findings.
+- Raw tool outputs and debug/trace references should be opt-in via separate request flags.
 
 ## Proposed UI Shape
 
@@ -274,17 +368,40 @@ Keep color use sparse and meaningful. Let typography, spacing, and section order
 
 ### Phase 2
 
+- Add a durable service-history projection inside ESS.
+- Expose grouped read endpoints by service and release version.
 - Add richer drilldown and timeline presentation.
-- Add a dedicated aggregation endpoint only if the existing response shape starts to feel awkward.
+- Start moving dashboard drilldowns toward the service-history API instead of session IDs.
+- Add retention management for the 90-day history window.
 
 ### Phase 3
 
 - Add optional auth, saved filters, and live updates only after the dashboard has proven useful.
 - Consider SSE or WebSockets only if polling becomes inadequate.
+- Decide whether the session endpoint remains a debug surface or is formally deprecated from the public API contract.
+
+## Resolved Decisions
+
+- Use `ServiceTarget.name` as the canonical public service key.
+- Keep Datadog and Sentry service identifiers internal to ESS.
+- Scope service-history endpoints by environment.
+- Target 90 days of retained deploy-history data.
+- Expose `GET /api/v1/services` as the discovery endpoint for human-facing service names within the retention window.
+- Expose `GET /api/v1/services/{service_name}` as a service overview resource.
+- Keep `latest_only=true` schema-compatible by returning a one-item list.
+- Support severity filtering from day one on the history endpoint.
+- Return summaries, evidence links, and structured findings by default.
+- Keep `include_raw` and `include_debug` as separate flags.
+- Only return raw tool outputs and debug/trace references when explicitly requested.
+- Allow either browser-to-ESS calls or a Hono same-origin facade, depending on deployment needs.
+
+## Remaining Clarifications
+
+- None for the current API surface. The contract is sufficiently defined to proceed into an implementation plan.
 
 ## Final Recommendation
 
-Build the ESS dashboard as a separate Bun + Hono + React container in the same mono-repo as ESS. Use React + Vite for the UI, keep Hono thin and explicit, consume the current FastAPI read endpoints first, and start with a minimal severity-first card layout before adding richer drilldowns.
+Build the ESS dashboard as a separate Bun + Hono + React container in the same mono-repo as ESS. Use Bun-native bundling and Biome rather than adding Vite by default, keep Hono thin and explicit, consume the current FastAPI session endpoints first, and then add a new persisted service-history API under a dedicated `services` namespace, including service discovery and service overview endpoints, for long-term dashboard and third-party frontend use.
 
 ## Alternatives Rejected
 

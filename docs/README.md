@@ -51,6 +51,7 @@
 |---|------|--------|------------|
 | 3 | **Sentry Integration** ([plan](plans/backlog/ess-sentry-integration.md)) | Phases S1-S4 are complete and review-complete; only deferred Phase S5 future work remains in backlog | 20-30h |
 | 4 | **Log Scout: Syslog Search Agent** ([plan](plans/backlog/ess-log-scout-syslog-agent.md)) | Backlog | 30-40h |
+| 5 | **ESS Services API and Findings Persistence** ([plan](plans/backlog/ess-services-api-persistence.md)) | Backlog | 32-48h |
 
 ---
 
